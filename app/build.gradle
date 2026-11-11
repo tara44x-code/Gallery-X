@@ -1,0 +1,56 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Signing secrets live in secure/keystore.properties (never in README or source control).
+def keystoreFile = rootProject.file('secure/keystore.properties')
+def keystore = new Properties()
+if (keystoreFile.exists()) keystoreFile.withInputStream { keystore.load(it) }
+
+android {
+    namespace 'com.tara.nawagallery'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.tara.nawagallery'
+        minSdk 26
+        targetSdk 35
+        versionCode 24
+        versionName '3.5.1'
+    }
+
+    signingConfigs {
+        galleryx {
+            if (keystoreFile.exists()) {
+                storeFile rootProject.file('secure/' + keystore['storeFile'])
+                storePassword keystore['storePassword']
+                keyAlias keystore['keyAlias']
+                keyPassword keystore['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        // Debug builds use the same key: the app refuses to run under any other signature.
+        debug {
+            if (keystoreFile.exists()) signingConfig signingConfigs.galleryx
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (keystoreFile.exists()) signingConfig signingConfigs.galleryx
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // On-device subtitle translation (Arabic / English). Language packs download once, then work offline.
+    implementation 'com.google.mlkit:translate:17.0.3'
+    implementation 'com.google.mlkit:language-id:17.0.6'
+}

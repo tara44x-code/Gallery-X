@@ -1,0 +1,12 @@
+secure/*
+!secure/keystore.properties.example
+*.jks
+*.keystore
+keystore.properties
+build/
+.gradle/
+local.properties
+.idea/
+*.iml
+*.apk
+*.aab
