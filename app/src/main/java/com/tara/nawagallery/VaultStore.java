@@ -63,6 +63,61 @@ public final class VaultStore {
         }
     }
 
+    public interface Progress { void step(int done, int total); }
+
+    /** Adds a file picked from a file manager (any app's document) to the vault. */
+    public static String importDocument(Context context, Uri uri, String name, String mime) {
+        return copyToVault(context, new MediaItem(0, uri, name, "", "", 0, mime));
+    }
+
+    /** Writes every vault file into a backup protected by {@code password}. Returns how many. */
+    public static int exportBackup(Context context, OutputStream output, String password, Progress progress) throws Exception {
+        SecretKey key = VaultSession.key();
+        if (key == null) throw new IllegalStateException("vault locked");
+        File[] files = directory(context).listFiles(file -> file.isFile() && file.getName().endsWith(EXTENSION));
+        if (files == null) files = new File[0];
+        Arrays.sort(files, Comparator.comparingLong(File::lastModified));
+        VaultBackup.Writer writer = new VaultBackup.Writer(output, password, context.getCacheDir());
+        int done = 0;
+        for (File file : files) {
+            try (VaultCrypto.Reader reader = new VaultCrypto.Reader(key, file)) {
+                writer.add(reader.stream(), checked(reader));
+            }
+            done++;
+            if (progress != null) progress.step(done, files.length);
+        }
+        writer.finish();
+        writer.close();
+        return writer.count();
+    }
+
+    /** Restores a backup into the vault (added next to what is already there). Returns how many. */
+    public static int importBackup(Context context, InputStream input, String password, Progress progress) throws Exception {
+        SecretKey key = VaultSession.key();
+        if (key == null) throw new IllegalStateException("vault locked");
+        int[] done = {0};
+        try {
+            return VaultBackup.read(input, password, context.getCacheDir(), reader -> {
+                String fileName = randomName();
+                File destination = new File(directory(context), fileName);
+                File partial = new File(directory(context), fileName + ".part");
+                try {
+                    VaultCrypto.encrypt(key, reader.stream(), partial, reader.meta);
+                    if (!partial.renameTo(destination)) throw new java.io.IOException("rename failed");
+                    if (reader.meta.dateTaken > 0) destination.setLastModified(reader.meta.dateTaken);
+                } catch (java.io.IOException error) {
+                    partial.delete();
+                    destination.delete();
+                    throw error;
+                }
+                done[0]++;
+                if (progress != null) progress.step(done[0], -1);
+            });
+        } finally {
+            cleanPartials(context);
+        }
+    }
+
     /**
      * Encrypts files left in clear text by Gallery X 3.4.x and earlier, then deletes the clear copy.
      * Run off the main thread right after unlocking. Returns how many files were secured.

@@ -38,7 +38,8 @@ public final class VaultSession {
     private static final String PREFS = "gx_vault_keys";
     private static final String ALIAS = "gx_vault_wrap_v1";
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
-    private static final Runnable AUTO_LOCK = VaultSession::lock;
+    private static volatile boolean held;
+    private static final Runnable AUTO_LOCK = () -> { if (!held) lock(); };
 
     private static volatile SecretKey fileKey;
     private static int startedActivities;
@@ -59,6 +60,18 @@ public final class VaultSession {
     public static void lock() {
         fileKey = null;
         VaultStore.forgetNames();
+    }
+
+    /**
+     * Keeps the vault open while the user is in a file picker or a backup is running, so the
+     * 10-second auto-lock does not cut the operation off. Always release it afterwards.
+     */
+    public static void hold(boolean value) {
+        held = value;
+        if (!value && startedActivities == 0) {
+            MAIN.removeCallbacks(AUTO_LOCK);
+            MAIN.postDelayed(AUTO_LOCK, AUTO_LOCK_MS);
+        }
     }
 
     /** Milliseconds until another PIN attempt is allowed (0 = allowed now). */

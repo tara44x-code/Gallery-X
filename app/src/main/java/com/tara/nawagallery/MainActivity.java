@@ -49,6 +49,9 @@ public class MainActivity extends Activity {
     private static final int VAULT_TRASH_REQUEST = 45;
     private static final int TRASH_RESTORE_REQUEST = 46;
     private static final int TRASH_DELETE_REQUEST = 47;
+    private static final int BACKUP_EXPORT_REQUEST = 48;
+    private static final int BACKUP_IMPORT_REQUEST = 49;
+    private static final int VAULT_ADD_FILES_REQUEST = 50;
     private enum Mode { PHOTOS, VIDEOS, ALBUMS, FAVORITES, SETTINGS, ALBUM, VAULT, DUPLICATES, TRASH }
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -839,6 +842,7 @@ public class MainActivity extends Activity {
             video.putExtra(VideoPlayerActivity.EXTRA_URI, item.uri.toString());
             video.putExtra(VideoPlayerActivity.EXTRA_NAME, item.name);
             video.putExtra(VideoPlayerActivity.EXTRA_MIME, item.mimeType);
+            video.putExtra(VideoPlayerActivity.EXTRA_PATH, item.filePath);
             startActivityForResult(video, VIEWER_REQUEST);
             return;
         }
@@ -886,10 +890,11 @@ public class MainActivity extends Activity {
         panel.addView(settingCard("حجم الكتابة", "الحجم الحالي: " + Math.round(GalleryPrefs.getFontScale(this) * 100) + "% — اضغط للتغيير", v -> showFontSizePicker()));
         panel.addView(settingCard("سلة المحذوفات", "تحديد الكل، استرجاع الكل، إفراغ السلة أو إدارة عناصر محددة", v -> showTrash()));
         panel.addView(settingCard("الخزنة الخاصة", "ملفات مشفّرة بالكامل تنفتح برقمك السري فقط، وتنقفل تلقائياً بعد مغادرة التطبيق", v -> openVault()));
+        panel.addView(settingCard("أدوات الخزنة", "نسخة احتياطية مشفّرة، استعادتها على أي هاتف، وإضافة ملفات من مدير الملفات", v -> showVaultTools()));
         panel.addView(settingCard("الصور المكررة", "فحص آمن للنسخ المتطابقة بالحجم وبصمة SHA-256", v -> scanDuplicates()));
         panel.addView(settingCard("المجلدات المخفية", "اختر المجلدات التي لا تريد ظهورها في Gallery X", v -> showHiddenFoldersPicker()));
         panel.addView(settingCard("حجم شبكة الصور", "عدد الأعمدة الحالي: " + GalleryPrefs.getColumns(this) + " — اضغط للاختيار من 2 إلى 5", v -> showGridSizePicker()));
-        panel.addView(settingCard("التطبيق الافتراضي للصور", "افتح صورة من مدير الملفات واختر Gallery X ثم دائمًا أو مرة واحدة. اضغط هنا لإدارة الاختيار.", v -> openDefaultSettings()));
+        panel.addView(settingCard("التطبيق الافتراضي للصور والفيديو", "افتح صورة أو فيديو من مدير الملفات أو تيليگرام، واختر Gallery X ثم «دائمًا». اضغط هنا لإدارة الاختيار.", v -> openDefaultSettings()));
         panel.addView(developerCard());
         scroll.addView(panel);
         replaceContent(scroll);
@@ -1213,6 +1218,248 @@ public class MainActivity extends Activity {
         }, "vault-migrate").start();
     }
 
+    // ================================================================== vault tools: backup, restore, add files
+
+    private void showVaultTools() {
+        String[] items = {"تصدير نسخة احتياطية مشفّرة", "استيراد نسخة احتياطية", "إضافة ملفات من مدير الملفات"};
+        new AlertDialog.Builder(this)
+                .setTitle("أدوات الخزنة")
+                .setItems(items, (dialog, which) -> requireVault(() -> {
+                    VaultSession.hold(true);
+                    Intent intent;
+                    if (which == 0) {
+                        intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        intent.setType("application/octet-stream");
+                        String day = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new java.util.Date());
+                        intent.putExtra(Intent.EXTRA_TITLE, "GalleryX-vault-" + day + VaultBackup.EXTENSION);
+                        startActivityForResult(intent, BACKUP_EXPORT_REQUEST);
+                    } else if (which == 1) {
+                        intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        intent.setType("*/*");
+                        startActivityForResult(intent, BACKUP_IMPORT_REQUEST);
+                    } else {
+                        intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        intent.setType("*/*");
+                        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
+                        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                        startActivityForResult(intent, VAULT_ADD_FILES_REQUEST);
+                    }
+                }))
+                .show();
+    }
+
+    private void handleVaultToolResult(int requestCode, int resultCode, Intent data) {
+        if (resultCode != RESULT_OK || data == null) {
+            VaultSession.hold(false);
+            return;
+        }
+        if (!VaultSession.isUnlocked()) {
+            VaultSession.hold(false);
+            Toast.makeText(this, "انقفلت الخزنة، افتحها وحاول مرة ثانية", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (requestCode == VAULT_ADD_FILES_REQUEST) {
+            ArrayList<Uri> uris = new ArrayList<>();
+            if (data.getClipData() != null) {
+                for (int i = 0; i < data.getClipData().getItemCount(); i++) uris.add(data.getClipData().getItemAt(i).getUri());
+            } else if (data.getData() != null) uris.add(data.getData());
+            addFilesToVault(uris);
+            return;
+        }
+        Uri target = data.getData();
+        if (target == null) {
+            VaultSession.hold(false);
+            return;
+        }
+        boolean export = requestCode == BACKUP_EXPORT_REQUEST;
+        askBackupPassword(export, password -> {
+            if (password == null) {
+                VaultSession.hold(false);
+                if (export) deleteDocumentQuietly(target);
+                return;
+            }
+            if (export) {
+                runVaultTask("جارِ تجهيز النسخة الاحتياطية…", progress -> {
+                    try (java.io.OutputStream out = getContentResolver().openOutputStream(target, "wt")) {
+                        if (out == null) throw new java.io.IOException("cannot write");
+                        int count = VaultStore.exportBackup(this, new java.io.BufferedOutputStream(out, 256 * 1024), password, progress);
+                        return "تم حفظ " + count + " ملف بالنسخة الاحتياطية.\n\nاحتفظ بالملف بمكان آمن (مثل Google Drive أو فلاشة) وتذكّر كلمة سر النسخة، بدونها ما تنفتح أبداً.";
+                    } catch (Exception error) {
+                        deleteDocumentQuietly(target);
+                        throw error;
+                    }
+                });
+            } else {
+                runVaultTask("جارِ فتح النسخة الاحتياطية…", progress -> {
+                    try (java.io.InputStream in = getContentResolver().openInputStream(target)) {
+                        if (in == null) throw new java.io.IOException("cannot read");
+                        int count = VaultStore.importBackup(this, new java.io.BufferedInputStream(in, 256 * 1024), password, progress);
+                        return "تمت استعادة " + count + " ملف إلى الخزنة.";
+                    } catch (VaultBackup.BadPasswordException wrong) {
+                        return "كلمة سر النسخة غلط، أو الملف مو نسخة احتياطية من Gallery X.";
+                    } catch (VaultBackup.TruncatedException partial) {
+                        return "الملف ناقص (ممكن ما اكتمل تنزيله). انسترجع منه " + partial.restored + " ملف.";
+                    }
+                });
+            }
+        });
+    }
+
+    private void addFilesToVault(List<Uri> uris) {
+        if (uris.isEmpty()) {
+            VaultSession.hold(false);
+            return;
+        }
+        ArrayList<Uri> added = new ArrayList<>();
+        runVaultTask("جارِ تشفير الملفات داخل الخزنة…", progress -> {
+            int done = 0;
+            for (Uri uri : uris) {
+                String name = documentName(uri);
+                String type = null;
+                try { type = getContentResolver().getType(uri); } catch (Exception ignored) { }
+                if (VaultStore.importDocument(this, uri, name, type) != null) added.add(uri);
+                done++;
+                progress.step(done, uris.size());
+            }
+            return "انضاف " + added.size() + " من " + uris.size() + " ملف للخزنة.";
+        }, () -> {
+            if (added.isEmpty()) return;
+            new AlertDialog.Builder(this)
+                    .setTitle("حذف الملفات الأصلية؟")
+                    .setMessage("الملفات صارت مشفّرة داخل الخزنة. تريد أحذف النسخ الأصلية المكشوفة من مدير الملفات؟")
+                    .setNegativeButton("اتركها", null)
+                    .setPositiveButton("احذفها", (d, w) -> executor.execute(() -> {
+                        int removed = 0;
+                        for (Uri uri : added) if (deleteDocumentQuietly(uri)) removed++;
+                        int count = removed;
+                        runOnUiThread(() -> Toast.makeText(this, count == added.size()
+                                ? "انحذفت الملفات الأصلية"
+                                : "انحذف " + count + " من " + added.size() + "، والباقي احذفه من مدير الملفات", Toast.LENGTH_LONG).show());
+                    }))
+                    .show();
+        });
+    }
+
+    private String documentName(Uri uri) {
+        try (android.database.Cursor cursor = getContentResolver().query(uri,
+                new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null) return cursor.getString(0);
+        } catch (Exception ignored) { }
+        String last = uri.getLastPathSegment();
+        return last == null ? "ملف" : last.substring(last.lastIndexOf('/') + 1);
+    }
+
+    private boolean deleteDocumentQuietly(Uri uri) {
+        try { return android.provider.DocumentsContract.deleteDocument(getContentResolver(), uri); }
+        catch (Exception ignored) { return false; }
+    }
+
+    private void askBackupPassword(boolean create, java.util.function.Consumer<String> result) {
+        LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(Ui.dp(this, 18), Ui.dp(this, 8), Ui.dp(this, 18), 0);
+        TextView note = new TextView(this);
+        note.setText(create
+                ? "اختار كلمة سر للنسخة الاحتياطية (" + VaultBackup.MIN_PASSWORD + " حروف أو أكثر). تگدر تفتح بيها النسخة على أي هاتف. إذا نسيتها، النسخة ما تنفتح أبداً. لا تستخدم نفس رقم الخزنة."
+                : "اكتب كلمة السر اللي حطيتها وقت سوّيت النسخة الاحتياطية.");
+        note.setTextColor(0xFFFFC2E8);
+        note.setTextSize(Ui.textSize(this, 14));
+        note.setPadding(0, 0, 0, Ui.dp(this, 10));
+        fields.addView(note);
+        EditText first = backupPasswordInput("كلمة سر النسخة");
+        fields.addView(first, new LinearLayout.LayoutParams(-1, Ui.dp(this, 52)));
+        EditText second = create ? backupPasswordInput("تأكيد كلمة السر") : null;
+        if (second != null) {
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, Ui.dp(this, 52));
+            params.setMargins(0, Ui.dp(this, 10), 0, 0);
+            fields.addView(second, params);
+        }
+        boolean[] answered = {false};
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(create ? "تصدير نسخة احتياطية" : "استيراد نسخة احتياطية")
+                .setView(fields)
+                .setNegativeButton("إلغاء", null)
+                .setPositiveButton(create ? "تصدير" : "استيراد", null)
+                .create();
+        dialog.setOnDismissListener(d -> { if (!answered[0]) result.accept(null); });
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String one = first.getText().toString();
+            if (create && one.length() < VaultBackup.MIN_PASSWORD) {
+                first.setError("اكتب " + VaultBackup.MIN_PASSWORD + " حروف أو أكثر");
+                return;
+            }
+            if (!create && one.isEmpty()) return;
+            if (second != null && !one.equals(second.getText().toString())) {
+                second.setError("كلمتا السر غير متطابقتين");
+                return;
+            }
+            answered[0] = true;
+            dialog.dismiss();
+            result.accept(one);
+        }));
+        dialog.show();
+    }
+
+    private EditText backupPasswordInput(String hint) {
+        EditText input = new EditText(this);
+        input.setHint(hint);
+        input.setTextColor(Color.WHITE);
+        input.setHintTextColor(0xFFBDB4CE);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        input.setBackground(Ui.rounded(Ui.withAlpha(theme.surfaceAlt, 245), 14, this));
+        input.setPadding(Ui.dp(this, 14), 0, Ui.dp(this, 14), 0);
+        return input;
+    }
+
+    private interface VaultTask { String run(VaultStore.Progress progress) throws Exception; }
+
+    private void runVaultTask(String title, VaultTask task) { runVaultTask(title, task, null); }
+
+    /** Runs a long vault job with a progress dialog; the vault stays unlocked until it ends. */
+    private void runVaultTask(String title, VaultTask task, Runnable afterSuccess) {
+        VaultSession.hold(true);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER_HORIZONTAL);
+        box.setPadding(Ui.dp(this, 20), Ui.dp(this, 18), Ui.dp(this, 20), Ui.dp(this, 8));
+        box.addView(new ProgressBar(this), new LinearLayout.LayoutParams(Ui.dp(this, 52), Ui.dp(this, 52)));
+        TextView status = new TextView(this);
+        status.setTextColor(Color.WHITE);
+        status.setGravity(Gravity.CENTER);
+        status.setPadding(0, Ui.dp(this, 12), 0, 0);
+        status.setText("لا تطلع من التطبيق لحد ما يخلص");
+        box.addView(status);
+        AlertDialog progressDialog = new AlertDialog.Builder(this).setTitle(title).setView(box).setCancelable(false).create();
+        progressDialog.show();
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        new Thread(() -> {
+            String message;
+            boolean ok = true;
+            try {
+                message = task.run((done, total) -> runOnUiThread(() ->
+                        status.setText(total > 0 ? "تم " + done + " من " + total : "تم " + done + " ملف")));
+            } catch (Exception error) {
+                ok = false;
+                message = "ما اكتملت العملية: تأكد من المساحة الفارغة والملف، وحاول مرة ثانية.";
+            }
+            String finalMessage = message;
+            boolean success = ok;
+            runOnUiThread(() -> {
+                VaultSession.hold(false);
+                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                if (isFinishing()) return;
+                try { progressDialog.dismiss(); } catch (Exception ignored) { }
+                if (mode == Mode.VAULT && VaultSession.isUnlocked()) showVaultUnlocked();
+                new AlertDialog.Builder(this).setTitle("الخزنة").setMessage(finalMessage)
+                        .setPositiveButton("حسناً", (d, w) -> { if (success && afterSuccess != null) afterSuccess.run(); })
+                        .show();
+            });
+        }, "vault-task").start();
+    }
+
     private void showVaultUnlocked() {
         if (!VaultSession.isUnlocked()) {
             openVault();
@@ -1374,6 +1621,10 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == BACKUP_EXPORT_REQUEST || requestCode == BACKUP_IMPORT_REQUEST || requestCode == VAULT_ADD_FILES_REQUEST) {
+            handleVaultToolResult(requestCode, resultCode, data);
+            return;
+        }
         if (requestCode == TRASH_RESTORE_REQUEST || requestCode == TRASH_DELETE_REQUEST) {
             if (resultCode == RESULT_OK) {
                 leaveSelectionMode();

@@ -206,6 +206,27 @@ public final class VaultCrypto {
             return cached;
         }
 
+        /** The plain content as a stream (decrypted chunk by chunk, never all in memory). */
+        public InputStream stream() {
+            return new InputStream() {
+                private long position;
+                private final byte[] one = new byte[1];
+
+                @Override public int read() throws IOException {
+                    int n = read(one, 0, 1);
+                    return n <= 0 ? -1 : one[0] & 0xff;
+                }
+
+                @Override public int read(byte[] buffer, int offset, int length) throws IOException {
+                    if (length == 0) return 0;
+                    int n = Reader.this.read(position, length, buffer, offset);
+                    if (n <= 0) return -1;
+                    position += n;
+                    return n;
+                }
+            };
+        }
+
         /** Streams all plain bytes into {@code out}. */
         public void copyTo(OutputStream out) throws IOException {
             for (int i = 0; i < chunkCount; i++) out.write(chunk(i));
