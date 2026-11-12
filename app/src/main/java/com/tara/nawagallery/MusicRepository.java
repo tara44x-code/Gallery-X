@@ -45,7 +45,7 @@ final class MusicRepository {
                     folder = parent == null ? null : parent.getName();
                 }
                 songs.add(new Song(id, ContentUris.withAppendedId(collection, id), c.getString(1), c.getString(2),
-                        c.getString(3), c.getLong(4), c.getLong(5), folder));
+                        c.getString(3), c.getLong(4), c.getLong(5), folder, c.getString(6)));
             }
         } catch (Exception ignored) { }
         return songs;
@@ -74,11 +74,21 @@ final class MusicRepository {
             if (name == null) name = uri.getLastPathSegment();
             title = name == null ? null : name.replaceFirst("\\.[^.]+$", "");
         }
-        return new Song(0, uri, title, artist, album, -1, duration, null);
+        return new Song(0, uri, title, artist, album, -1, duration, null, "file".equals(uri.getScheme()) ? uri.getPath() : null);
     }
 
-    /** Album art, or null. Slow: call off the main thread. */
+    /** Album art as a normal (software) bitmap, or null. Slow: call off the main thread. */
     static Bitmap art(Context context, Song song, int size) {
+        Bitmap bitmap = artRaw(context, song, size);
+        // Hardware bitmaps cannot be read, scaled for the widget or sent in a notification.
+        if (bitmap != null && Build.VERSION.SDK_INT >= 26 && bitmap.getConfig() == Bitmap.Config.HARDWARE) {
+            Bitmap copy = bitmap.copy(Bitmap.Config.ARGB_8888, false);
+            if (copy != null) bitmap = copy;
+        }
+        return bitmap;
+    }
+
+    private static Bitmap artRaw(Context context, Song song, int size) {
         if (song == null) return null;
         if (Build.VERSION.SDK_INT >= 29) {
             try { return context.getContentResolver().loadThumbnail(song.uri, new Size(size, size), null); }

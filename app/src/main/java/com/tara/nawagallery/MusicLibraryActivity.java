@@ -2,6 +2,7 @@ package com.tara.nawagallery;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -21,6 +22,7 @@ import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -31,7 +33,8 @@ import java.util.Map;
 /** Music section: all songs, or grouped by artist, album or folder, with search and a now-playing bar. */
 public class MusicLibraryActivity extends Activity implements MusicService.Listener {
     private static final int PERMISSION_REQUEST = 71;
-    private static final String[] VIEWS = {"الأغاني", "الفنانين", "الألبومات", "المجلدات"};
+    private static final String[] VIEWS = {"الأغاني", "المفضلة", "القوائم", "الأكثر استماعاً", "آخر ما سمعت", "الفنانين", "الألبومات", "المجلدات"};
+    private static final String NEW_PLAYLIST = "＋ قائمة جديدة";
 
     private ThemePrefs.ThemeStyle theme;
     private final List<Song> all = new ArrayList<>();
@@ -48,7 +51,9 @@ public class MusicLibraryActivity extends Activity implements MusicService.Liste
     private static final class Group {
         final String name;
         final List<Song> songs = new ArrayList<>();
-        Group(String name) { this.name = name; }
+        final boolean playlist;
+        Group(String name) { this(name, false); }
+        Group(String name, boolean playlist) { this.name = name; this.playlist = playlist; }
     }
 
     @Override protected void onCreate(Bundle state) {
@@ -157,6 +162,7 @@ public class MusicLibraryActivity extends Activity implements MusicService.Liste
         adapter = new RowAdapter();
         list.setAdapter(adapter);
         list.setOnItemClickListener((parent, item, position, id) -> onRow(position));
+        list.setOnItemLongClickListener((parent, item, position, id) -> { onLongRow(position); return true; });
         body.addView(list, new FrameLayout.LayoutParams(-1, -1));
         empty = label("", 16, false);
         empty.setPadding(Ui.dp(this, 30), 0, Ui.dp(this, 30), 0);
@@ -221,31 +227,125 @@ public class MusicLibraryActivity extends Activity implements MusicService.Liste
     private void rebuild() {
         rows.clear();
         updateChips();
-        if (view == 0 || openGroup != null) {
-            List<Song> source = openGroup != null ? openGroup.songs : all;
+        if (openGroup != null) {
+            if (openGroup.playlist) { // re-read: songs may have been removed
+                List<String> keys = MusicStore.playlists(this).get(openGroup.name);
+                openGroup.songs.clear();
+                if (keys != null) openGroup.songs.addAll(MusicStore.resolve(keys, all));
+            }
+            for (Song song : openGroup.songs) if (matches(song)) rows.add(song);
+        } else if (view == 0 || view == 1 || view == 3 || view == 4) {
+            List<Song> source = view == 1 ? MusicStore.favorites(this, all) : view == 3 ? MusicStore.mostPlayed(this, all)
+                    : view == 4 ? MusicStore.recent(this, all) : all;
             for (Song song : source) if (matches(song)) rows.add(song);
+        } else if (view == 2) {
+            rows.add(NEW_PLAYLIST);
+            for (Map.Entry<String, List<String>> entry : MusicStore.playlists(this).entrySet()) {
+                Group group = new Group(entry.getKey(), true);
+                group.songs.addAll(MusicStore.resolve(entry.getValue(), all));
+                rows.add(group);
+            }
         } else {
             Map<String, Group> groups = new LinkedHashMap<>();
             for (Song song : all) {
                 if (!matches(song)) continue;
-                String key = view == 1 ? song.artist : view == 2 ? song.album : song.folder;
+                String key = view == 5 ? song.artist : view == 6 ? song.album : song.folder;
                 Group group = groups.get(key);
                 if (group == null) { group = new Group(key); groups.put(key, group); }
                 group.songs.add(song);
             }
             List<Group> sorted = new ArrayList<>(groups.values());
-            sorted.sort((a, b) -> a.name.compareToIgnoreCase(b.name));
+            sorted.sort((x, y) -> x.name.compareToIgnoreCase(y.name));
             rows.addAll(sorted);
         }
         backToGroups.setVisibility(openGroup == null ? View.GONE : View.VISIBLE);
         if (openGroup != null) backToGroups.setText("‹  " + VIEWS[view] + "  /  " + openGroup.name);
         adapter.notifyDataSetChanged();
         if (all.isEmpty()) showEmpty(hasPermission() ? "ما لگيت أغاني بهاتفك." : "اسمح لـ Gallery X يوصل للموسيقى حتى تظهر أغانيك هنا.");
-        else showEmpty(rows.isEmpty() ? "ماكو نتائج." : null);
+        else if (rows.isEmpty()) showEmpty(view == 1 ? "اضغط ♡ بالمشغّل حتى تضيف أغاني للمفضلة."
+                : view == 3 || view == 4 ? "شغّل كم أغنية وتطلع هنا." : "ماكو نتائج.");
+        else showEmpty(null);
+    }
+
+    private void onLongRow(int position) {
+        Object row = rows.get(position);
+        if (row instanceof Group && ((Group) row).playlist) {
+            Group group = (Group) row;
+            new AlertDialog.Builder(this).setTitle(group.name)
+                    .setItems(new String[]{"تغيير الاسم", "حذف القائمة"}, (d, which) -> {
+                        LinkedHashMap<String, List<String>> lists = MusicStore.playlists(this);
+                        if (which == 1) {
+                            lists.remove(group.name);
+                            MusicStore.savePlaylists(this, lists);
+                            rebuild();
+                        } else askName(group.name, name -> {
+                            LinkedHashMap<String, List<String>> renamed = new LinkedHashMap<>();
+                            for (Map.Entry<String, List<String>> e : lists.entrySet())
+                                renamed.put(e.getKey().equals(group.name) ? name : e.getKey(), e.getValue());
+                            MusicStore.savePlaylists(this, renamed);
+                            rebuild();
+                        });
+                    }).show();
+            return;
+        }
+        if (!(row instanceof Song)) return;
+        Song song = (Song) row;
+        boolean fav = MusicStore.isFavorite(this, song);
+        List<String> items = new ArrayList<>();
+        items.add(fav ? "♥ شيلها من المفضلة" : "♡ أضفها للمفضلة");
+        items.add("＋ إضافة إلى قائمة");
+        boolean inPlaylist = openGroup != null && openGroup.playlist;
+        if (inPlaylist) items.add("✕ إزالة من «" + openGroup.name + "»");
+        new AlertDialog.Builder(this).setTitle(song.title).setItems(items.toArray(new String[0]), (d, which) -> {
+            if (which == 0) { MusicStore.toggleFavorite(this, song); rebuild(); }
+            else if (which == 1) chooseListFor(song);
+            else if (inPlaylist) {
+                LinkedHashMap<String, List<String>> lists = MusicStore.playlists(this);
+                List<String> keys = lists.get(openGroup.name);
+                if (keys != null) keys.remove(MusicStore.key(song));
+                MusicStore.savePlaylists(this, lists);
+                rebuild();
+            }
+        }).show();
+    }
+
+    private void chooseListFor(Song song) {
+        List<String> names = new ArrayList<>(MusicStore.playlists(this).keySet());
+        names.add(NEW_PLAYLIST);
+        new AlertDialog.Builder(this).setTitle("إضافة إلى قائمة").setItems(names.toArray(new String[0]), (d, which) -> {
+            if (which == names.size() - 1) askName("", name -> { MusicStore.addToPlaylist(this, name, song); rebuild(); });
+            else { MusicStore.addToPlaylist(this, names.get(which), song); rebuild(); }
+        }).show();
+    }
+
+    private void askName(String current, java.util.function.Consumer<String> done) {
+        EditText input = new EditText(this);
+        input.setHint("اسم القائمة");
+        input.setText(current);
+        input.setSingleLine(true);
+        FrameLayout box = new FrameLayout(this);
+        box.setPadding(Ui.dp(this, 20), Ui.dp(this, 8), Ui.dp(this, 20), 0);
+        box.addView(input);
+        new AlertDialog.Builder(this).setTitle(current.isEmpty() ? "قائمة جديدة" : "تغيير الاسم").setView(box)
+                .setNegativeButton("إلغاء", null)
+                .setPositiveButton("حفظ", (d, w) -> {
+                    String name = input.getText().toString().trim();
+                    if (!name.isEmpty()) done.accept(name);
+                }).show();
     }
 
     private void onRow(int position) {
         Object row = rows.get(position);
+        if (NEW_PLAYLIST.equals(row)) {
+            askName("", name -> {
+                LinkedHashMap<String, List<String>> lists = MusicStore.playlists(this);
+                if (!lists.containsKey(name)) lists.put(name, new ArrayList<>());
+                MusicStore.savePlaylists(this, lists);
+                rebuild();
+                Toast.makeText(this, "سوّيت القائمة. اضغط مطوّلاً على أي أغنية وأضفها لها", Toast.LENGTH_LONG).show();
+            });
+            return;
+        }
         if (row instanceof Group) {
             openGroup = (Group) row;
             rebuild();
@@ -281,6 +381,7 @@ public class MusicLibraryActivity extends Activity implements MusicService.Liste
     @Override protected void onStart() {
         super.onStart();
         MusicService.addListener(this);
+        if (!all.isEmpty()) rebuild(); // favourites / history may have changed in the player
         onMusicChanged();
     }
 
@@ -336,9 +437,15 @@ public class MusicLibraryActivity extends Activity implements MusicService.Liste
                 second.setText(song.artist + " · " + MusicRepository.time(song.durationMs));
                 icon.setBackground(Ui.rounded(current ? theme.primary : Ui.withAlpha(theme.surfaceAlt, 230), 24, MusicLibraryActivity.this));
                 row.setBackground(current ? Ui.rounded(Ui.withAlpha(theme.primary, 55), 16, MusicLibraryActivity.this) : null);
+            } else if (item instanceof String) {
+                icon.setText("＋");
+                first.setText((String) item);
+                second.setText("سوّي قائمة تشغيل جديدة");
+                icon.setBackground(Ui.rounded(theme.primary, 24, MusicLibraryActivity.this));
+                row.setBackground(null);
             } else {
                 Group group = (Group) item;
-                icon.setText(view == 1 ? "♪" : view == 2 ? "◎" : "▤");
+                icon.setText(group.playlist ? "☰" : view == 5 ? "♪" : view == 6 ? "◎" : "▤");
                 first.setText(group.name);
                 second.setText(group.songs.size() + " أغنية");
                 icon.setBackground(Ui.rounded(Ui.withAlpha(theme.secondary, 150), 24, MusicLibraryActivity.this));

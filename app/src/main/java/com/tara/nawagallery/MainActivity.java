@@ -938,7 +938,7 @@ public class MainActivity extends Activity {
         signature.setTypeface(android.graphics.Typeface.create("serif", android.graphics.Typeface.BOLD_ITALIC));
         signature.setRotation(-1.2f);
         signature.setPadding(0, Ui.dp(this, 4), 0, Ui.dp(this, 4));
-        TextView version = message("رقم الإصدار: 3.4.1", 15);
+        TextView version = message("رقم الإصدار: " + appVersion(), 15);
         version.setGravity(Gravity.CENTER);
         version.setTextColor(0xFFF0E8F5);
         card.addView(label);
@@ -1686,5 +1686,14 @@ public class MainActivity extends Activity {
     @Override protected void onDestroy() {
         super.onDestroy();
         executor.shutdownNow();
+    }
+
+    /** The real version from the installed APK, so the settings page is always right. */
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 }

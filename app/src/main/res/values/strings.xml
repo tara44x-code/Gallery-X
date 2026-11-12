@@ -24,4 +24,11 @@
     <string name="confirm_trash">نقل الصورة إلى سلة المحذوفات؟</string>
     <string name="theme_title">ألوان التطبيق</string>
     <string name="photo_position">%1$d من %2$d</string>
+    <string name="widget_art">غلاف الأغنية</string>
+    <string name="widget_idle">اضغط للتشغيل</string>
+    <string name="widget_previous">السابق</string>
+    <string name="widget_play">تشغيل أو إيقاف مؤقت</string>
+    <string name="widget_next">التالي</string>
+    <string name="widget_description">تحكم بالموسيقى من الشاشة الرئيسية</string>
+    <string name="widget_label">موسيقى Gallery X</string>
 </resources>

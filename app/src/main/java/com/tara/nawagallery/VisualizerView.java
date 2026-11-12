@@ -31,7 +31,9 @@ public final class VisualizerView extends View {
 
     private static final int B = SpectrumAnalyzer.BANDS;
     private final float density;
-    private final int primary, secondary;
+    private int primary, secondary;
+    private int fromPrimary, fromSecondary, toPrimary, toSecondary;
+    private float colorT = 1f;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint glow = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
@@ -56,8 +58,8 @@ public final class VisualizerView extends View {
 
     public VisualizerView(Context context, int primary, int secondary) {
         super(context);
-        this.primary = primary;
-        this.secondary = secondary;
+        this.primary = toPrimary = fromPrimary = primary;
+        this.secondary = toSecondary = fromSecondary = secondary;
         density = context.getResources().getDisplayMetrics().density;
         setLayerType(LAYER_TYPE_HARDWARE, null);
     }
@@ -70,6 +72,19 @@ public final class VisualizerView extends View {
         this.mode = ((mode % MODES.length) + MODES.length) % MODES.length;
         invalidate();
     }
+
+    /** Glides to new colours (taken from the album art) over about a second. */
+    public void setColors(int newPrimary, int newSecondary) {
+        fromPrimary = primary;
+        fromSecondary = secondary;
+        toPrimary = newPrimary;
+        toSecondary = newSecondary;
+        colorT = 0f;
+        invalidate();
+    }
+
+    public int primaryColor() { return primary; }
+    public int secondaryColor() { return secondary; }
 
     public void setArt(Bitmap bitmap) {
         art = bitmap;
@@ -84,6 +99,11 @@ public final class VisualizerView extends View {
         float dt = lastFrame == 0 ? 0.016f : Math.min(0.1f, (now - lastFrame) / 1000f);
         lastFrame = now;
         time += dt;
+        if (colorT < 1f) {
+            colorT = Math.min(1f, colorT + dt / 0.9f);
+            primary = mix(fromPrimary, toPrimary, colorT);
+            secondary = mix(fromSecondary, toSecondary, colorT);
+        }
         boolean playing = source != null && source.playing();
         SpectrumAnalyzer.Frames frames = source == null ? null : source.frames();
         int index = frames == null ? -1 : frames.indexAt(source.position());
@@ -116,7 +136,7 @@ public final class VisualizerView extends View {
             case 3: drawWaves(canvas); break;
             default: drawParticles(canvas); break;
         }
-        boolean moving = (source != null && source.playing()) || spin > 0.01f || level > 0.01f || bass > 0.01f || anyParticle();
+        boolean moving = colorT < 1f || (source != null && source.playing()) || spin > 0.01f || level > 0.01f || bass > 0.01f || anyParticle();
         if (moving) postInvalidateOnAnimation();
     }
 
