@@ -10,3 +10,6 @@
 -renamesourcefileattribute SourceFile
 -keepattributes *Annotation*
 -keep class com.tara.nawagallery.GalleryApp { public <init>(); }
+-keep class com.tara.nawagallery.MusicService { public <init>(); }
+-keep class com.tara.nawagallery.MusicLibraryActivity { public <init>(); }
+-keep class com.tara.nawagallery.MusicPlayerActivity { public <init>(); }

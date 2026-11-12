@@ -173,6 +173,7 @@ public class MainActivity extends Activity {
         bottomBar.setBackgroundColor(Ui.withAlpha(theme.surface, 244));
         photosTab = addTab(bottomBar, "▧\n" + getString(R.string.photos), this::showAllPhotos);
         videosTab = addTab(bottomBar, "▶\n" + getString(R.string.videos), this::showAllVideos);
+        addTab(bottomBar, "♫\nموسيقى", () -> startActivity(new Intent(this, MusicLibraryActivity.class)));
         favoritesTab = addTab(bottomBar, "♡\n" + getString(R.string.favorites), this::showFavorites);
         settingsTab = addTab(bottomBar, "⚙\n" + getString(R.string.settings), this::showSettings);
         root.addView(bottomBar, new LinearLayout.LayoutParams(-1, Ui.dp(this, 78)));
