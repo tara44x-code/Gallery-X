@@ -11,6 +11,7 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RadialGradient;
 import android.graphics.Shader;
+import android.graphics.SweepGradient;
 import android.os.SystemClock;
 import android.view.View;
 
@@ -32,6 +33,14 @@ public final class VisualizerView extends View {
     private static final int B = SpectrumAnalyzer.BANDS;
     private final float density;
     private int primary, secondary;
+    /** Neon spectrum: one colour per degree of hue (360), so every effect can paint a full rainbow. */
+    private static final int[] NEON = new int[360];
+    private static final int SPECTRUM = 36; // colour stops used for rings and waves (every 10°)
+    static {
+        for (int h = 0; h < 360; h++) NEON[h] = Color.HSVToColor(new float[]{h, 0.82f, 1f});
+    }
+    private boolean rainbow = true;
+    private float hue;
     private int fromPrimary, fromSecondary, toPrimary, toSecondary;
     private float colorT = 1f;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -52,7 +61,7 @@ public final class VisualizerView extends View {
     // particles
     private static final int MAX = 220;
     private final float[] px = new float[MAX], py = new float[MAX], vx = new float[MAX], vy = new float[MAX],
-            life = new float[MAX], size = new float[MAX];
+            life = new float[MAX], size = new float[MAX], tint = new float[MAX];
     private final boolean[] alt = new boolean[MAX];
     private int next;
 
@@ -83,6 +92,29 @@ public final class VisualizerView extends View {
         invalidate();
     }
 
+    /** Rainbow neon on every effect (true) or the album / theme colours (false). */
+    public void setRainbow(boolean on) { rainbow = on; invalidate(); }
+    public boolean rainbow() { return rainbow; }
+
+    /** Colour at {@code position} 0..1 along an effect; the rainbow slowly turns with the music. */
+    private int tone(float position) {
+        if (!rainbow) return mix(primary, secondary, position);
+        int h = (int) (position * 360f + hue) % 360;
+        return NEON[h < 0 ? h + 360 : h];
+    }
+
+    private int[] spectrum(float alphaValue, float offset) {
+        int[] colors = new int[SPECTRUM + 1];
+        for (int i = 0; i <= SPECTRUM; i++) colors[i] = alpha(tone(offset + (float) i / SPECTRUM), alphaValue);
+        return colors;
+    }
+
+    /** A ring paint: rainbow sweep around the circle, or a single colour. */
+    private void ring(Paint p, float cx, float cy, float alphaValue, int single) {
+        if (rainbow) p.setShader(new SweepGradient(cx, cy, spectrum(alphaValue, 0f), null));
+        else { p.setShader(null); p.setColor(alpha(single, alphaValue)); }
+    }
+
     public int primaryColor() { return primary; }
     public int secondaryColor() { return secondary; }
 
@@ -99,6 +131,7 @@ public final class VisualizerView extends View {
         float dt = lastFrame == 0 ? 0.016f : Math.min(0.1f, (now - lastFrame) / 1000f);
         lastFrame = now;
         time += dt;
+        hue = (hue + dt * (14f + bass * 70f + beat * 40f)) % 360f; // the spectrum turns faster on the beat
         if (colorT < 1f) {
             colorT = Math.min(1f, colorT + dt / 0.9f);
             primary = mix(fromPrimary, toPrimary, colorT);
@@ -189,11 +222,12 @@ public final class VisualizerView extends View {
         // pulsing neon halo
         glow.setStyle(Paint.Style.STROKE);
         glow.setStrokeWidth(dp(14) + bass * dp(26));
-        glow.setColor(alpha(primary, 0.18f + bass * 0.35f + beat * 0.2f));
+        ring(glow, cx, cy, 0.18f + bass * 0.35f + beat * 0.2f, primary);
         canvas.drawCircle(cx, cy, r + dp(10) + bass * dp(10), glow);
         glow.setStrokeWidth(dp(3) + bass * dp(5));
-        glow.setColor(alpha(mix(primary, secondary, bass), 0.85f));
+        ring(glow, cx, cy, 0.9f, mix(primary, secondary, bass));
         canvas.drawCircle(cx, cy, r + dp(4), glow);
+        glow.setShader(null);
         // record
         paint.setStyle(Paint.Style.FILL);
         paint.setShader(new RadialGradient(cx, cy, r, new int[]{0xFF1A1A22, 0xFF0B0B10, 0xFF050507}, new float[]{0f, 0.7f, 1f}, Shader.TileMode.CLAMP));
@@ -235,10 +269,14 @@ public final class VisualizerView extends View {
         float base = h * 0.72f, maxH = h * 0.6f;
         float slot = w / B, bar = slot * 0.62f;
         paint.setStyle(Paint.Style.FILL);
-        paint.setShader(new LinearGradient(0, base - maxH, 0, base, secondary, primary, Shader.TileMode.CLAMP));
+        if (!rainbow) paint.setShader(new LinearGradient(0, base - maxH, 0, base, secondary, primary, Shader.TileMode.CLAMP));
         for (int i = 0; i < B; i++) {
             float x = i * slot + (slot - bar) / 2f;
             float height = Math.max(dp(3), smooth[i] * maxH);
+            if (rainbow) {
+                int c = tone((float) i / B);
+                paint.setShader(new LinearGradient(0, base - height, 0, base, c, alpha(c, 0.55f), Shader.TileMode.CLAMP));
+            }
             canvas.drawRoundRect(x, base - height, x + bar, base, bar / 2f, bar / 2f, paint);
         }
         paint.setShader(null);
@@ -246,12 +284,12 @@ public final class VisualizerView extends View {
         for (int i = 0; i < B; i++) {
             float x = i * slot + (slot - bar) / 2f;
             float height = smooth[i] * maxH * 0.35f;
-            paint.setColor(alpha(primary, 0.18f));
+            paint.setColor(alpha(rainbow ? tone((float) i / B) : primary, 0.2f));
             canvas.drawRoundRect(x, base + dp(4), x + bar, base + dp(4) + height, bar / 2f, bar / 2f, paint);
         }
         // falling peak caps
-        paint.setColor(Color.WHITE);
         for (int i = 0; i < B; i++) {
+            paint.setColor(rainbow ? mix(tone((float) i / B), Color.WHITE, 0.5f) : Color.WHITE);
             float x = i * slot + (slot - bar) / 2f;
             float y = base - Math.max(dp(3), peaks[i] * maxH) - dp(6);
             canvas.drawRoundRect(x, y, x + bar, y + dp(3), dp(1.5f), dp(1.5f), paint);
@@ -275,17 +313,18 @@ public final class VisualizerView extends View {
             float cos = (float) Math.cos(a), sin = (float) Math.sin(a);
             float r0 = r + dp(8);
             paint.setStrokeWidth(stroke);
-            paint.setColor(mix(primary, secondary, (float) band / B));
+            paint.setColor(rainbow ? tone((float) s / spokes) : mix(primary, secondary, (float) band / B));
             canvas.drawLine(cx + cos * r0, cy + sin * r0, cx + cos * (r0 + len), cy + sin * (r0 + len), paint);
         }
         paint.setStrokeCap(Paint.Cap.BUTT);
         glow.setStyle(Paint.Style.STROKE);
         glow.setStrokeWidth(dp(3));
-        glow.setColor(alpha(primary, 0.9f));
+        ring(glow, cx, cy, 0.9f, primary);
         canvas.drawCircle(cx, cy, r + dp(3), glow);
         glow.setStrokeWidth(dp(16));
-        glow.setColor(alpha(primary, 0.15f + level * 0.25f));
+        ring(glow, cx, cy, 0.15f + level * 0.25f, primary);
         canvas.drawCircle(cx, cy, r + dp(3), glow);
+        glow.setShader(null);
         drawCover(canvas, cx, cy, r, angle * 0.25f);
     }
 
@@ -316,12 +355,15 @@ public final class VisualizerView extends View {
             }
             path.close();
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(alpha(colors[layer], 0.22f + layer * 0.08f));
+            if (rainbow) paint.setShader(new LinearGradient(0, 0, w, 0, spectrum(0.22f + layer * 0.08f, layer * 0.12f), null, Shader.TileMode.CLAMP));
+            else paint.setColor(alpha(colors[layer], 0.22f + layer * 0.08f));
             canvas.drawPath(path, paint);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(2));
-            paint.setColor(alpha(colors[layer], 0.9f));
+            if (rainbow) paint.setShader(new LinearGradient(0, 0, w, 0, spectrum(0.95f, layer * 0.12f), null, Shader.TileMode.CLAMP));
+            else paint.setColor(alpha(colors[layer], 0.9f));
             canvas.drawPath(path, paint);
+            paint.setShader(null);
         }
     }
 
@@ -336,7 +378,7 @@ public final class VisualizerView extends View {
         // core glow
         float core = Math.min(getWidth(), getHeight()) * (0.08f + level * 0.08f + beat * 0.04f);
         paint.setStyle(Paint.Style.FILL);
-        paint.setShader(new RadialGradient(cx, cy, core * 2.6f, new int[]{alpha(Color.WHITE, 0.9f), alpha(primary, 0.55f), Color.TRANSPARENT},
+        paint.setShader(new RadialGradient(cx, cy, core * 2.6f, new int[]{alpha(Color.WHITE, 0.9f), alpha(rainbow ? tone(0f) : primary, 0.55f), Color.TRANSPARENT},
                 new float[]{0f, 0.35f, 1f}, Shader.TileMode.CLAMP));
         canvas.drawCircle(cx, cy, core * 2.6f, paint);
         paint.setShader(null);
@@ -348,7 +390,7 @@ public final class VisualizerView extends View {
             vy[i] *= 0.985f;
             life[i] -= dt * 0.7f;
             if (life[i] <= 0f) continue;
-            paint.setColor(alpha(alt[i] ? secondary : primary, life[i]));
+            paint.setColor(alpha(rainbow ? tone(tint[i]) : alt[i] ? secondary : primary, life[i]));
             canvas.drawCircle(px[i], py[i], size[i] * (0.5f + life[i] * 0.5f), paint);
         }
         // faint spectrum ring for context
@@ -358,7 +400,7 @@ public final class VisualizerView extends View {
         for (int s = 0; s < B; s++) {
             double a = Math.toRadians(s * 360f / B - 90);
             float len = smooth[s] * core * 1.6f;
-            paint.setColor(alpha(mix(primary, secondary, (float) s / B), 0.5f));
+            paint.setColor(alpha(tone((float) s / B), 0.5f));
             canvas.drawLine(cx + (float) Math.cos(a) * ring, cy + (float) Math.sin(a) * ring,
                     cx + (float) Math.cos(a) * (ring + len), cy + (float) Math.sin(a) * (ring + len), paint);
         }
@@ -377,6 +419,7 @@ public final class VisualizerView extends View {
             life[i] = 0.7f + random.nextFloat() * 0.3f;
             size[i] = dp(2) + random.nextFloat() * dp(4);
             alt[i] = random.nextBoolean();
+            tint[i] = random.nextFloat();
         }
     }
 

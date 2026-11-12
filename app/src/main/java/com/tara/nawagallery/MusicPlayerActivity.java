@@ -190,6 +190,15 @@ public class MusicPlayerActivity extends Activity implements MusicService.Listen
         lyricsChip = chip(tools, "♪ كلمات", v -> toggleLyrics());
         chip(tools, "🎚 المعادل", v -> showEqualizer());
         speedChip = chip(tools, speedLabel(MusicStore.speed(this)), v -> chooseSpeed());
+        boolean rainbow = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("rainbow", true);
+        visualizer.setRainbow(rainbow);
+        TextView[] colorChip = new TextView[1];
+        colorChip[0] = chip(tools, rainbow ? "🌈 طيف نيون" : "🎨 ألوان الغلاف", v -> {
+            boolean on = !visualizer.rainbow();
+            visualizer.setRainbow(on);
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("rainbow", on).apply();
+            colorChip[0].setText(on ? "🌈 طيف نيون" : "🎨 ألوان الغلاف");
+        });
         toolScroll.addView(tools);
         LinearLayout.LayoutParams toolParams = new LinearLayout.LayoutParams(-2, Ui.dp(this, 46));
         toolParams.gravity = Gravity.CENTER_HORIZONTAL;
