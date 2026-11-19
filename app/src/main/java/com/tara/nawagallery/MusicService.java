@@ -515,9 +515,12 @@ public class MusicService extends Service {
         artFor = song;
         new Thread(() -> {
             Bitmap bitmap = MusicRepository.art(this, song, 512);
+            // No cover: a neon spectrum picture, so the notification, lock screen and widget keep the app's look.
+            if (bitmap == null) bitmap = NeonCover.make(song.title + song.artist, 512);
+            Bitmap cover = bitmap;
             main.post(() -> {
                 if (artFor != song) return;
-                art = bitmap;
+                art = cover;
                 refresh();
             });
         }, "gx-music-art").start();

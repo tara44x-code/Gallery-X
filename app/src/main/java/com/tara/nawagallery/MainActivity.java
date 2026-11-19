@@ -91,11 +91,44 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(true);
         buildUi();
         if (hasImageAccess()) {
-            if (Build.VERSION.SDK_INT >= 33 &&
+            // Android 13 only: photos allowed but videos not yet. On Android 14+ asking again while the user
+            // gave "selected photos" access opens the picker every launch (and an empty pick hides everything).
+            if (Build.VERSION.SDK_INT == 33 &&
                     checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.READ_MEDIA_VIDEO}, PERMISSION_REQUEST);
-            } else loadGallery();
+            } else {
+                loadGallery();
+                if (isPartialAccess()) contentHost.postDelayed(this::explainPartialAccess, 900);
+            }
         } else showPermissionScreen();
+    }
+
+    /** Android 14+: the user allowed only some photos ("Select photos"), not the whole gallery. */
+    private boolean isPartialAccess() {
+        return Build.VERSION.SDK_INT >= 34
+                && checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean partialAccessShown;
+    private boolean wasPartial;
+
+    private void explainPartialAccess() {
+        if (isFinishing() || partialAccessShown || !isPartialAccess()) return;
+        partialAccessShown = true;
+        wasPartial = true;
+        new AlertDialog.Builder(this)
+                .setTitle("الوصول للصور محدود")
+                .setMessage("Gallery X يشوف بس الصور والفيديوهات اللي اخترتها، ولهذا الاستوديو يبين فارغ أو ناقص.\n\n"
+                        + "حتى تظهر كل صورك وفيديوهاتك: اضغط «فتح الإعدادات» ← الأذونات ← الصور والفيديوهات ← «السماح بالكل».")
+                .setPositiveButton("فتح الإعدادات", (d, w) -> {
+                    try {
+                        startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getPackageName(), null)));
+                    } catch (Exception ignored) { }
+                })
+                .setNeutralButton("اختيار صور أكثر", (d, w) -> requestImageAccess())
+                .setNegativeButton("لاحقاً", null)
+                .show();
     }
 
     private void buildUi() {
@@ -895,6 +928,9 @@ public class MainActivity extends Activity {
         panel.addView(settingCard("الصور المكررة", "فحص آمن للنسخ المتطابقة بالحجم وبصمة SHA-256", v -> scanDuplicates()));
         panel.addView(settingCard("المجلدات المخفية", "اختر المجلدات التي لا تريد ظهورها في Gallery X", v -> showHiddenFoldersPicker()));
         panel.addView(settingCard("حجم شبكة الصور", "عدد الأعمدة الحالي: " + GalleryPrefs.getColumns(this) + " — اضغط للاختيار من 2 إلى 5", v -> showGridSizePicker()));
+        if (isPartialAccess()) panel.addView(settingCard("⚠ الوصول للصور محدود",
+                "Gallery X يشوف بس الصور اللي اخترتها. اضغط حتى تسمح بكل الصور والفيديوهات.",
+                v -> { partialAccessShown = false; explainPartialAccess(); }));
         panel.addView(settingCard("التطبيق الافتراضي للصور والفيديو", "افتح صورة أو فيديو من مدير الملفات أو تيليگرام، واختر Gallery X ثم «دائمًا». اضغط هنا لإدارة الاختيار.", v -> openDefaultSettings()));
         panel.addView(developerCard());
         scroll.addView(panel);
@@ -1616,7 +1652,10 @@ public class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_REQUEST) {
-            if (hasImageAccess()) loadGallery(); else showPermissionScreen();
+            if (hasImageAccess()) {
+                loadGallery();
+                if (isPartialAccess()) contentHost.postDelayed(this::explainPartialAccess, 600);
+            } else showPermissionScreen();
         }
     }
 
@@ -1663,6 +1702,11 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        // Came back from the system settings with full access granted: show the whole gallery now.
+        if (wasPartial && !isPartialAccess() && hasImageAccess()) {
+            wasPartial = false;
+            loadGallery();
+        }
         if (mode == Mode.VAULT && !VaultSession.isUnlocked()) {
             vaultBackgroundAt = 0L;
             showSettings();
