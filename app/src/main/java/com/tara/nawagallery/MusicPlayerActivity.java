@@ -128,6 +128,10 @@ public class MusicPlayerActivity extends Activity implements MusicService.Listen
         back.setOnClickListener(v -> finish());
         top.addView(back, new LinearLayout.LayoutParams(Ui.dp(this, 52), Ui.dp(this, 52)));
         top.addView(text("قيد التشغيل", 18, true), new LinearLayout.LayoutParams(0, Ui.dp(this, 52), 1));
+        TextView info = text("ⓘ", 24, true);
+        info.setContentDescription("معلومات الأغنية");
+        info.setOnClickListener(v -> showSongInfo());
+        top.addView(info, new LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 52)));
         TextView library = text("☰", 22, true);
         library.setContentDescription("مكتبة الموسيقى");
         library.setOnClickListener(v -> startActivity(new Intent(this, MusicLibraryActivity.class)));
@@ -418,6 +422,67 @@ public class MusicPlayerActivity extends Activity implements MusicService.Listen
                 if (!showLyrics) toggleLyrics();
             });
         }, "gx-lyrics-pick").start();
+    }
+
+    // ------------------------------------------------------------------ song info
+
+    private void showSongInfo() {
+        Song song = shownSong;
+        if (song == null) return;
+        MusicService service = MusicService.get();
+        int duration = service != null && service.current() == song ? service.duration() : (int) song.durationMs;
+        new Thread(() -> {
+            StringBuilder out = new StringBuilder();
+            PhotoInfo.line(out, "العنوان", song.title);
+            PhotoInfo.line(out, "الفنان", song.artist);
+            PhotoInfo.line(out, "الألبوم", song.album);
+            String year = null, genre = null, mime = null, bitrate = null;
+            android.media.MediaMetadataRetriever r = new android.media.MediaMetadataRetriever();
+            try {
+                r.setDataSource(this, song.uri);
+                year = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_YEAR);
+                genre = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_GENRE);
+                mime = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE);
+                bitrate = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE);
+            } catch (Exception ignored) {
+            } finally {
+                try { r.release(); } catch (Exception ignored) { }
+            }
+            PhotoInfo.line(out, "السنة", year);
+            PhotoInfo.line(out, "النوع الموسيقي", genre);
+            PhotoInfo.line(out, "المدة", duration > 0 ? MusicRepository.time(duration) : null);
+            String quality = "";
+            if (mime != null) quality += mime.replace("audio/", "").replace("mpeg", "MP3").toUpperCase(Locale.US);
+            if (bitrate != null) try { quality += "  ·  " + Long.parseLong(bitrate) / 1000 + " kbps"; } catch (NumberFormatException ignored) { }
+            android.media.MediaExtractor extractor = new android.media.MediaExtractor();
+            try {
+                extractor.setDataSource(this, song.uri, null);
+                for (int i = 0; i < extractor.getTrackCount(); i++) {
+                    android.media.MediaFormat f = extractor.getTrackFormat(i);
+                    String m = f.getString(android.media.MediaFormat.KEY_MIME);
+                    if (m == null || !m.startsWith("audio/")) continue;
+                    int rate = f.getInteger(android.media.MediaFormat.KEY_SAMPLE_RATE);
+                    int channels = f.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT);
+                    quality += String.format(Locale.US, "  ·  %.1f kHz", rate / 1000f) + (channels == 1 ? "  ·  مونو" : channels == 2 ? "  ·  ستيريو" : "  ·  " + channels + " قنوات");
+                    break;
+                }
+            } catch (Exception ignored) {
+            } finally {
+                extractor.release();
+            }
+            PhotoInfo.line(out, "الجودة", quality.replaceFirst("^  ·  ", ""));
+            long bytes = PhotoInfo.size(this, song.uri, -1);
+            PhotoInfo.line(out, "الحجم", bytes > 0 ? PhotoInfo.readableSize(bytes) : null);
+            PhotoInfo.line(out, "المجلد", song.folder);
+            PhotoInfo.line(out, "المسار", song.path);
+            int plays = MusicStore.playCount(this, song);
+            PhotoInfo.line(out, "مرات الاستماع", plays > 0 ? String.valueOf(plays) : null);
+            String text = out.toString().trim();
+            runOnUiThread(() -> {
+                if (isFinishing()) return;
+                new AlertDialog.Builder(this).setTitle("ⓘ معلومات الأغنية").setMessage(text).setPositiveButton("حسناً", null).show();
+            });
+        }, "gx-song-info").start();
     }
 
     // ------------------------------------------------------------------ favourites and playlists

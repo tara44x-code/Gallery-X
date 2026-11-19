@@ -119,6 +119,11 @@ final class MusicStore {
         } catch (Exception ignored) { }
     }
 
+    static int playCount(Context context, Song song) {
+        try { return new JSONObject(prefs(context).getString("counts", "{}")).optInt(key(song), 0); }
+        catch (Exception e) { return 0; }
+    }
+
     static List<Song> mostPlayed(Context context, List<Song> library) {
         List<Song> out = new ArrayList<>();
         try {

@@ -29,6 +29,13 @@ public final class ViewerSession {
         if (index <= 0 || ITEMS.isEmpty()) return null;
         return ITEMS.get(--index);
     }
+    /** Back to the first photo (the slideshow loops). */
+    public static synchronized MediaItem first() {
+        if (ITEMS.isEmpty()) return null;
+        index = 0;
+        return ITEMS.get(0);
+    }
+
     public static synchronized void removeCurrent() {
         if (ITEMS.isEmpty()) return;
         ITEMS.remove(index);
