@@ -14,6 +14,9 @@ public final class SubtitlePrefs {
     public static final String[] COLOR_LABELS = {"أبيض", "أصفر", "لون الثيم (نيون)"};
     public static final String[] BACKGROUND_LABELS = {"بدون خلفية", "خلفية شفافة", "خلفية داكنة"};
 
+    public static final String[] FONT_LABELS = {"عادي عريض", "عادي", "مثل الأفلام", "رفيع", "ضيق عريض"};
+    public static final String[] OUTLINE_LABELS = {"بدون حدود", "حدود خفيفة", "حدود سميكة"};
+
     private static final String PREFS = "gx_subtitle_style";
 
     private SubtitlePrefs() {}
@@ -36,6 +39,21 @@ public final class SubtitlePrefs {
 
     public static boolean glow(Context context) { return prefs(context).getBoolean("glow", true); }
     public static void setGlow(Context context, boolean value) { prefs(context).edit().putBoolean("glow", value).apply(); }
+
+    public static int font(Context context) { return clamp(prefs(context).getInt("font", 0), FONT_LABELS.length); }
+    public static void setFont(Context context, int value) { prefs(context).edit().putInt("font", value).apply(); }
+
+    public static int outline(Context context) { return clamp(prefs(context).getInt("outline", 1), OUTLINE_LABELS.length); }
+    public static void setOutline(Context context, int value) { prefs(context).edit().putInt("outline", value).apply(); }
+
+    /** Pinch zoom on top of the chosen size, 0.5×–3×. */
+    public static float scale(Context context) { return prefs(context).getFloat("scale", 1f); }
+    public static void setScale(Context context, float value) { prefs(context).edit().putFloat("scale", value).apply(); }
+
+    /** Where the subtitle was dragged, as a fraction of the screen (0 = default place). */
+    public static float offsetX(Context context) { return prefs(context).getFloat("offset_x", 0f); }
+    public static float offsetY(Context context) { return prefs(context).getFloat("offset_y", 0f); }
+    public static void setOffset(Context context, float x, float y) { prefs(context).edit().putFloat("offset_x", x).putFloat("offset_y", y).apply(); }
 
     public static String languageLabel(String language) {
         if (ARABIC.equals(language)) return "العربية";

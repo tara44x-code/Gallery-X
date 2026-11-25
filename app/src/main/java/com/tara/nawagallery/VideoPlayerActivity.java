@@ -25,7 +25,7 @@ public class VideoPlayerActivity extends Activity {
     private final Handler handler=new Handler(Looper.getMainLooper());
     private Uri uri; private String name,mime; private FrameLayout root; private VideoView video;
     private MediaPlayer player; private ProgressBar loading; private LinearLayout top,center,bottom;
-    private TextView favorite,play,elapsed,duration,speed,unlock,title,subtitle,gestureFeedback; private SeekBar seek;
+    private TextView favorite,play,elapsed,duration,speed,unlock,title,gestureFeedback; private OutlineTextView subtitle; private EditText cueSearch; private final List<Integer> cueMatches=new ArrayList<>(); private String cueQuery=""; private SeekBar seek;
     private AudioManager audio; private GestureDetector gestures; private ScaleGestureDetector scaleGestures;
     private boolean dragging,visible=true,locked,repeatVideo; private float playbackSpeed=1f,zoom=1f;
     private int displayMode; private long abStart=-1,abEnd=-1; private String videoPath; private boolean userRotated;
@@ -96,11 +96,11 @@ public class VideoPlayerActivity extends Activity {
         HorizontalScrollView extraScroll=new HorizontalScrollView(this);extraScroll.setHorizontalScrollBarEnabled(false);LinearLayout extras=new LinearLayout(this);extras.setGravity(Gravity.CENTER);
         addExtra(extras,"⏮ السابق",this::previousVideo,theme.surfaceAlt);addExtra(extras,"التالي ⏭",this::nextVideo,theme.surfaceAlt);addExtra(extras,"▣ العرض",this::cycleDisplay,theme.surfaceAlt);addExtra(extras,"CC ترجمة",this::subtitleMenu,theme.surfaceAlt);addExtra(extras,"☰ السطور",this::openCueList,theme.surfaceAlt);addExtra(extras,"▧ لقطة",this::captureFrame,theme.surfaceAlt);addExtra(extras,"↻ تكرار",this::toggleRepeat,theme.surfaceAlt);addExtra(extras,"A–B مقطع",this::markAb,theme.surfaceAlt);extraScroll.addView(extras);bottom.addView(extraScroll,new LinearLayout.LayoutParams(-1,Ui.dp(this,58)));
         root.addView(bottom,new FrameLayout.LayoutParams(-1,Ui.dp(this,164),Gravity.BOTTOM));
-        subtitle=action("",null,18);subtitle.setPadding(Ui.dp(this,12),Ui.dp(this,5),Ui.dp(this,12),Ui.dp(this,5));subtitle.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG_LTR);subtitle.setVisibility(View.GONE);applySubtitleStyle();FrameLayout.LayoutParams sp=new FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);sp.bottomMargin=Ui.dp(this,176);sp.leftMargin=Ui.dp(this,20);sp.rightMargin=Ui.dp(this,20);root.addView(subtitle,sp);
+        subtitle=new OutlineTextView(this);subtitle.setGravity(Gravity.CENTER);subtitle.setPadding(Ui.dp(this,12),Ui.dp(this,5),Ui.dp(this,12),Ui.dp(this,5));subtitle.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG_LTR);subtitle.setVisibility(View.GONE);applySubtitleStyle();FrameLayout.LayoutParams sp=new FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);sp.bottomMargin=Ui.dp(this,176);sp.leftMargin=Ui.dp(this,20);sp.rightMargin=Ui.dp(this,20);root.addView(subtitle,sp);setupSubtitleGestures();
         unlock=round("🔓 فتح القفل",v->setLocked(false),theme.primary); unlock.setVisibility(View.GONE); FrameLayout.LayoutParams up=new FrameLayout.LayoutParams(Ui.dp(this,150),Ui.dp(this,54),Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL); up.bottomMargin=Ui.dp(this,24); root.addView(unlock,up);
         buildCueList(); updateFavorite(); setContentView(root);
         root.setOnApplyWindowInsetsListener(this::onInsets);
-        root.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,oright,ob)->{if(r-l!=oright-ol||b-t!=ob-ot)video.post(this::applyDisplay);});
+        root.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,oright,ob)->{if(r-l!=oright-ol||b-t!=ob-ot){video.post(this::applyDisplay);root.post(this::applySubtitlePlace);}});
     }
     private LinearLayout.LayoutParams box(int n){return new LinearLayout.LayoutParams(Ui.dp(this,n),Ui.dp(this,n));}
     private LinearLayout.LayoutParams weight(){return new LinearLayout.LayoutParams(0,-1,1);}
@@ -161,7 +161,7 @@ public class VideoPlayerActivity extends Activity {
 
     private void applySubtitles(List<SubtitleParser.Cue> result,String message){
         if(translator!=null){translator.close();translator=null;}
-        subtitles=result; subtitlesHidden=false; shownCue=-2; setListStatus("");
+        subtitles=result; subtitlesHidden=false; shownCue=-2; setListStatus(""); cueQuery=""; cueMatches.clear(); if(cueSearch!=null)cueSearch.setText("");
         if(cueAdapter!=null)cueAdapter.notifyDataSetChanged();
         Toast.makeText(this,message,Toast.LENGTH_SHORT).show();
         restartTranslation();
@@ -268,7 +268,7 @@ public class VideoPlayerActivity extends Activity {
 
     private void resetSubtitles(){
         if(translator!=null){translator.close();translator=null;}
-        subtitles=new ArrayList<>(); shownCue=-2; setListStatus("");
+        subtitles=new ArrayList<>(); shownCue=-2; setListStatus(""); cueQuery=""; cueMatches.clear(); if(cueSearch!=null)cueSearch.setText("");
         if(cueAdapter!=null)cueAdapter.notifyDataSetChanged();
         if(listPanel!=null)listPanel.setVisibility(View.GONE);
         subtitle.setText(""); subtitle.setVisibility(View.GONE);
@@ -356,7 +356,7 @@ public class VideoPlayerActivity extends Activity {
             shownCue=current;
             if(listPanel!=null&&listPanel.getVisibility()==View.VISIBLE){
                 cueAdapter.notifyDataSetChanged();
-                if(current>=0&&SystemClock.uptimeMillis()-listTouchedAt>3000)cueList.smoothScrollToPositionFromTop(current,Ui.dp(this,90),220);
+                if(current>=0&&cueQuery.isEmpty()&&SystemClock.uptimeMillis()-listTouchedAt>3000)cueList.smoothScrollToPositionFromTop(current,Ui.dp(this,90),220);
             }
         }
     }
@@ -365,13 +365,18 @@ public class VideoPlayerActivity extends Activity {
 
     private void applySubtitleStyle(){
         if(subtitle==null)return;
-        subtitle.setTextSize(Ui.textSize(this,SubtitlePrefs.SIZES[SubtitlePrefs.size(this)]));
+        subtitle.setTextSize(Ui.textSize(this,SubtitlePrefs.SIZES[SubtitlePrefs.size(this)])*SubtitlePrefs.scale(this));
+        int font=SubtitlePrefs.font(this);
+        subtitle.setTypeface(font==1?Typeface.create("sans-serif",Typeface.NORMAL):font==2?Typeface.create(Typeface.SERIF,Typeface.BOLD)
+                :font==3?Typeface.create("sans-serif-light",Typeface.NORMAL):font==4?Typeface.create("sans-serif-condensed",Typeface.BOLD):Typeface.DEFAULT_BOLD);
+        int outline=SubtitlePrefs.outline(this);
+        subtitle.setOutline(outline==0?0:Ui.dp(this,outline==1?2.5f:5f),Color.BLACK);
         int color=SubtitlePrefs.color(this);
         subtitle.setTextColor(color==0?Color.WHITE:color==1?0xFFFFE45C:neon(theme.primary));
         int background=SubtitlePrefs.background(this);
         subtitle.setBackground(background==0?null:Ui.rounded(background==1?0x8C000000:0xE6000000,10,this));
         if(SubtitlePrefs.glow(this))subtitle.setShadowLayer(Ui.dp(this,7),0,0,theme.primary);
-        else if(background==0)subtitle.setShadowLayer(Ui.dp(this,3),0,Ui.dp(this,1),Color.BLACK);
+        else if(background==0&&outline==0)subtitle.setShadowLayer(Ui.dp(this,3),0,Ui.dp(this,1),Color.BLACK);
         else subtitle.setShadowLayer(0,0,0,Color.TRANSPARENT);
         subtitle.setLineSpacing(Ui.dp(this,2),1f);
     }
@@ -383,12 +388,15 @@ public class VideoPlayerActivity extends Activity {
     }
 
     private void styleMenu(){
-        String[] items={"الحجم: "+SubtitlePrefs.SIZE_LABELS[SubtitlePrefs.size(this)],"اللون: "+SubtitlePrefs.COLOR_LABELS[SubtitlePrefs.color(this)],"الخلفية: "+SubtitlePrefs.BACKGROUND_LABELS[SubtitlePrefs.background(this)],"توهج نيون: "+(SubtitlePrefs.glow(this)?"مفعّل":"متوقف")};
+        String[] items={"الحجم: "+SubtitlePrefs.SIZE_LABELS[SubtitlePrefs.size(this)]+(Math.abs(SubtitlePrefs.scale(this)-1f)>0.01f?" ("+Math.round(SubtitlePrefs.scale(this)*100)+"%)":""),"الخط: "+SubtitlePrefs.FONT_LABELS[SubtitlePrefs.font(this)],"الحدود: "+SubtitlePrefs.OUTLINE_LABELS[SubtitlePrefs.outline(this)],"اللون: "+SubtitlePrefs.COLOR_LABELS[SubtitlePrefs.color(this)],"الخلفية: "+SubtitlePrefs.BACKGROUND_LABELS[SubtitlePrefs.background(this)],"توهج نيون: "+(SubtitlePrefs.glow(this)?"مفعّل":"متوقف"),"إرجاع الحجم والمكان الأصلي"};
         new AlertDialog.Builder(this).setTitle("شكل الترجمة").setItems(items,(d,which)->{
-            if(which==0)choose("حجم الخط",SubtitlePrefs.SIZE_LABELS,SubtitlePrefs.size(this),v->SubtitlePrefs.setSize(this,v));
-            else if(which==1)choose("لون الخط",SubtitlePrefs.COLOR_LABELS,SubtitlePrefs.color(this),v->SubtitlePrefs.setColor(this,v));
-            else if(which==2)choose("الخلفية",SubtitlePrefs.BACKGROUND_LABELS,SubtitlePrefs.background(this),v->SubtitlePrefs.setBackground(this,v));
-            else{SubtitlePrefs.setGlow(this,!SubtitlePrefs.glow(this));applySubtitleStyle();previewSubtitle();styleMenu();}
+            if(which==0)choose("حجم الخط",SubtitlePrefs.SIZE_LABELS,SubtitlePrefs.size(this),v->{SubtitlePrefs.setSize(this,v);SubtitlePrefs.setScale(this,1f);});
+            else if(which==1)choose("الخط",SubtitlePrefs.FONT_LABELS,SubtitlePrefs.font(this),v->SubtitlePrefs.setFont(this,v));
+            else if(which==2)choose("الحدود حول الحروف",SubtitlePrefs.OUTLINE_LABELS,SubtitlePrefs.outline(this),v->SubtitlePrefs.setOutline(this,v));
+            else if(which==3)choose("لون الخط",SubtitlePrefs.COLOR_LABELS,SubtitlePrefs.color(this),v->SubtitlePrefs.setColor(this,v));
+            else if(which==4)choose("الخلفية",SubtitlePrefs.BACKGROUND_LABELS,SubtitlePrefs.background(this),v->SubtitlePrefs.setBackground(this,v));
+            else if(which==5){SubtitlePrefs.setGlow(this,!SubtitlePrefs.glow(this));applySubtitleStyle();previewSubtitle();styleMenu();}
+            else{resetSubtitlePlace();previewSubtitle();styleMenu();}
         }).setPositiveButton("تم",null).show();
     }
 
@@ -410,6 +418,104 @@ public class VideoPlayerActivity extends Activity {
         handler.postDelayed(endPreview,2500);
     }
 
+    // ------------------------------------------------------------------ pinch to resize, drag to move
+
+    private ScaleGestureDetector subtitleScale;
+    private float dragStartX,dragStartY,dragOriginX,dragOriginY;
+    private boolean dragging2;
+
+    /** Two fingers on the subtitle resize it, one finger drags it anywhere, double tap puts it back. */
+    private void setupSubtitleGestures(){
+        subtitleScale=new ScaleGestureDetector(this,new ScaleGestureDetector.SimpleOnScaleGestureListener(){
+            @Override public boolean onScale(ScaleGestureDetector d){
+                float scale=Math.max(0.5f,Math.min(3f,SubtitlePrefs.scale(VideoPlayerActivity.this)*d.getScaleFactor()));
+                SubtitlePrefs.setScale(VideoPlayerActivity.this,scale);
+                subtitle.setTextSize(Ui.textSize(VideoPlayerActivity.this,SubtitlePrefs.SIZES[SubtitlePrefs.size(VideoPlayerActivity.this)])*scale);
+                showGestureValue("حجم الترجمة "+Math.round(scale*100)+"%");
+                return true;
+            }
+        });
+        GestureDetector taps=new GestureDetector(this,new GestureDetector.SimpleOnGestureListener(){
+            @Override public boolean onDoubleTap(MotionEvent e){resetSubtitlePlace();showGestureValue("رجعت الترجمة لمكانها وحجمها");return true;}
+            @Override public boolean onSingleTapConfirmed(MotionEvent e){if(!locked)showControls(!visible);return true;}
+        });
+        subtitle.setOnTouchListener((v,e)->{
+            if(locked)return false;
+            subtitleScale.onTouchEvent(e);
+            taps.onTouchEvent(e);
+            switch(e.getActionMasked()){
+                case MotionEvent.ACTION_DOWN:
+                    dragStartX=e.getRawX();dragStartY=e.getRawY();dragOriginX=subtitle.getTranslationX();dragOriginY=subtitle.getTranslationY();dragging2=false;
+                    handler.removeCallbacks(autoHide);
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                    if(e.getPointerCount()>1||subtitleScale.isInProgress()){dragging2=false;break;}
+                    float dx=e.getRawX()-dragStartX,dy=e.getRawY()-dragStartY;
+                    if(!dragging2&&Math.hypot(dx,dy)>Ui.dp(this,8))dragging2=true;
+                    if(dragging2){
+                        subtitle.setTranslationX(clampSubX(dragOriginX+dx));
+                        subtitle.setTranslationY(clampSubY(dragOriginY+dy));
+                    }
+                    break;
+                case MotionEvent.ACTION_POINTER_DOWN:
+                    dragging2=false;
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    if(dragging2&&root.getWidth()>0&&root.getHeight()>0)
+                        SubtitlePrefs.setOffset(this,subtitle.getTranslationX()/root.getWidth(),subtitle.getTranslationY()/root.getHeight());
+                    dragging2=false;
+                    scheduleHide();
+                    break;
+            }
+            return true;
+        });
+        root.post(this::applySubtitlePlace);
+    }
+
+    /** Keeps the subtitle on screen while dragging. */
+    private float clampSubX(float x){
+        float limit=Math.max(0,(root.getWidth()-subtitle.getWidth())/2f);
+        return Math.max(-limit,Math.min(limit,x));
+    }
+
+    private float clampSubY(float y){
+        FrameLayout.LayoutParams p=(FrameLayout.LayoutParams)subtitle.getLayoutParams();
+        float top=-(root.getHeight()-p.bottomMargin-subtitle.getHeight());
+        return Math.max(top,Math.min(p.bottomMargin,y));
+    }
+
+    private void applySubtitlePlace(){
+        if(root.getWidth()<=0)return;
+        subtitle.setTranslationX(SubtitlePrefs.offsetX(this)*root.getWidth());
+        subtitle.setTranslationY(SubtitlePrefs.offsetY(this)*root.getHeight());
+    }
+
+    private void resetSubtitlePlace(){
+        SubtitlePrefs.setScale(this,1f);
+        SubtitlePrefs.setOffset(this,0f,0f);
+        subtitle.animate().translationX(0).translationY(0).setDuration(200).start();
+        applySubtitleStyle();
+    }
+
+    // ------------------------------------------------------------------ search inside the subtitles
+
+    private void filterCues(String query){
+        cueQuery=query.trim().toLowerCase(Locale.ROOT);
+        cueMatches.clear();
+        if(!cueQuery.isEmpty())for(int i=0;i<subtitles.size();i++){
+            SubtitleParser.Cue cue=subtitles.get(i);
+            if(cue.text.toLowerCase(Locale.ROOT).contains(cueQuery)||(cue.translated!=null&&cue.translated.toLowerCase(Locale.ROOT).contains(cueQuery)))cueMatches.add(i);
+        }
+        if(!cueQuery.isEmpty())setListStatus(cueMatches.isEmpty()?"ماكو نتائج":cueMatches.size()+" نتيجة");
+        else setListStatus("");
+        cueAdapter.notifyDataSetChanged();
+        if(cueQuery.isEmpty()&&shownCue>=0)cueList.setSelectionFromTop(shownCue,Ui.dp(this,90));
+    }
+
+    /** Cue index shown at a list row (all cues, or only the search results). */
+    private int cueAt(int row){return cueQuery.isEmpty()?row:cueMatches.get(row);}
+
     // ------------------------------------------------------------------ cue list panel
 
     private void buildCueList(){
@@ -425,11 +531,27 @@ public class VideoPlayerActivity extends Activity {
         TextView close=action("✕",v->listPanel.setVisibility(View.GONE),20); close.setContentDescription("إغلاق");
         header.addView(close,new LinearLayout.LayoutParams(Ui.dp(this,48),Ui.dp(this,44)));
         listPanel.addView(header,new LinearLayout.LayoutParams(-1,Ui.dp(this,44)));
+        cueSearch=new EditText(this);
+        cueSearch.setSingleLine(true);
+        cueSearch.setHint("🔍 ابحث بالترجمة");
+        cueSearch.setTextColor(Color.WHITE);
+        cueSearch.setHintTextColor(0xFFA0A0B8);
+        cueSearch.setTextSize(Ui.textSize(this,15));
+        cueSearch.setPadding(Ui.dp(this,14),0,Ui.dp(this,14),0);
+        cueSearch.setBackground(Ui.rounded(0xFF1E1730,14,this));
+        cueSearch.addTextChangedListener(new android.text.TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence s,int a,int b,int c){}
+            @Override public void onTextChanged(CharSequence s,int a,int b,int c){filterCues(s.toString());}
+            @Override public void afterTextChanged(android.text.Editable s){}
+        });
+        LinearLayout.LayoutParams searchParams=new LinearLayout.LayoutParams(-1,Ui.dp(this,42));
+        searchParams.setMargins(Ui.dp(this,4),0,Ui.dp(this,4),Ui.dp(this,6));
+        listPanel.addView(cueSearch,searchParams);
         cueList=new ListView(this); cueList.setDivider(null); cueList.setDividerHeight(Ui.dp(this,4)); cueList.setSelector(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         cueAdapter=new CueAdapter(); cueList.setAdapter(cueAdapter);
         cueList.setOnItemClickListener((parent,view,position,id)->{
-            if(position>=subtitles.size())return;
-            int target=(int)subtitles.get(position).start;
+            if(position>=cueAdapter.getCount())return;
+            int target=(int)subtitles.get(cueAt(position)).start;
             video.seekTo(target); seek.setProgress(target); elapsed.setText(time(target)); updateSubtitle(target);
         });
         cueList.setOnTouchListener((v,e)->{listTouchedAt=SystemClock.uptimeMillis();return false;});
@@ -442,7 +564,7 @@ public class VideoPlayerActivity extends Activity {
         layoutCueList(); listPanel.setVisibility(View.VISIBLE); listPanel.bringToFront();
         cueAdapter.notifyDataSetChanged(); listTouchedAt=0;
         int current=SubtitleParser.lastStarted(subtitles,video.getCurrentPosition());
-        if(current>=0)cueList.setSelectionFromTop(current,Ui.dp(this,90));
+        if(current>=0&&cueQuery.isEmpty())cueList.setSelectionFromTop(current,Ui.dp(this,90));
     }
 
     private void layoutCueList(){
@@ -572,8 +694,8 @@ public class VideoPlayerActivity extends Activity {
     @Override public void onConfigurationChanged(android.content.res.Configuration config){super.onConfigurationChanged(config);if(listPanel!=null&&listPanel.getVisibility()==View.VISIBLE)root.post(this::layoutCueList);}
     @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);if(translator!=null)translator.close();executor.shutdownNow();super.onDestroy();}
     private final class CueAdapter extends BaseAdapter{
-        @Override public int getCount(){return subtitles.size();}
-        @Override public Object getItem(int position){return subtitles.get(position);}
+        @Override public int getCount(){return cueQuery.isEmpty()?subtitles.size():cueMatches.size();}
+        @Override public Object getItem(int position){return subtitles.get(cueAt(position));}
         @Override public long getItemId(int position){return position;}
         @Override public View getView(int position,View convert,ViewGroup parent){
             LinearLayout row; TextView when,original,translated;
@@ -584,13 +706,14 @@ public class VideoPlayerActivity extends Activity {
                 when=line(12,0xFFA0A0B8); original=line(15,Color.WHITE); translated=line(15,neon(theme.primary));
                 row.addView(when); row.addView(original); row.addView(translated);
             }
-            SubtitleParser.Cue cue=subtitles.get(position);
+            int index=cueAt(position);
+            SubtitleParser.Cue cue=subtitles.get(index);
             when.setText(time((int)cue.start));
             original.setText(cue.text);
             boolean showTranslation=translating()&&cue.translated!=null&&!cue.translated.equals(cue.text);
             translated.setText(showTranslation?cue.translated:"");
             translated.setVisibility(showTranslation?View.VISIBLE:View.GONE);
-            boolean current=position==shownCue;
+            boolean current=index==shownCue;
             row.setBackground(current?Ui.rounded(Ui.withAlpha(theme.primary,70),12,VideoPlayerActivity.this):null);
             row.setAlpha(current?1f:0.82f);
             return row;
