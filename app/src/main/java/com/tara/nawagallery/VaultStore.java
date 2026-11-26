@@ -55,6 +55,7 @@ public final class VaultStore {
             VaultCrypto.encrypt(key, input, partial, meta);
             if (partial.length() <= 0L || !partial.renameTo(destination)) throw new Exception("copy failed");
             META.put(fileName, meta);
+            VaultMirror.syncSoon(context);
             return fileName;
         } catch (Exception ignored) {
             partial.delete();
@@ -115,6 +116,7 @@ public final class VaultStore {
             });
         } finally {
             cleanPartials(context);
+            VaultMirror.syncSoon(context);
         }
     }
 
@@ -144,6 +146,7 @@ public final class VaultStore {
             }
         }
         cleanPartials(context);
+        if (secured > 0) VaultMirror.syncSoon(context);
         return secured;
     }
 
@@ -200,6 +203,7 @@ public final class VaultStore {
             }
             if (source.delete()) {
                 META.remove(source.getName());
+                VaultMirror.syncSoon(context);
                 return true;
             }
             try { context.getContentResolver().delete(destination, null, null); } catch (Exception ignoredDelete) { }
@@ -213,14 +217,14 @@ public final class VaultStore {
     public static boolean delete(Context context, Uri uri) {
         File file = fileForUri(context, uri);
         boolean deleted = file != null && file.isFile() && file.delete();
-        if (deleted) META.remove(file.getName());
+        if (deleted) { META.remove(file.getName()); VaultMirror.syncSoon(context); }
         return deleted;
     }
 
     public static boolean deleteFileName(Context context, String fileName) {
         File file = safeFile(context, fileName);
         boolean deleted = file != null && file.isFile() && file.delete();
-        if (deleted) META.remove(fileName);
+        if (deleted) { META.remove(fileName); VaultMirror.syncSoon(context); }
         return deleted;
     }
 

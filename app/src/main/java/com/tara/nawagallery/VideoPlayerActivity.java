@@ -87,7 +87,7 @@ public class VideoPlayerActivity extends Activity {
 
         bottom=new LinearLayout(this); bottom.setOrientation(LinearLayout.VERTICAL); bottom.setPadding(Ui.dp(this,10),Ui.dp(this,4),Ui.dp(this,10),Ui.dp(this,6)); bottom.setBackgroundColor(0xDD100B1A);
         LinearLayout line=new LinearLayout(this); line.setGravity(Gravity.CENTER_VERTICAL); elapsed=action("00:00",null,13); duration=action("00:00",null,13); seek=new SeekBar(this);
-        seek.setProgressTintList(android.content.res.ColorStateList.valueOf(theme.primary)); line.addView(elapsed,new LinearLayout.LayoutParams(Ui.dp(this,54),Ui.dp(this,42))); line.addView(seek,new LinearLayout.LayoutParams(0,Ui.dp(this,42),1)); line.addView(duration,new LinearLayout.LayoutParams(Ui.dp(this,54),Ui.dp(this,42))); bottom.addView(line,new LinearLayout.LayoutParams(-1,Ui.dp(this,42)));
+        seek.setProgressTintList(android.content.res.ColorStateList.valueOf(theme.primary)); elapsed.setSingleLine(true);duration.setSingleLine(true);line.addView(elapsed,new LinearLayout.LayoutParams(Ui.dp(this,72),Ui.dp(this,42))); line.addView(seek,new LinearLayout.LayoutParams(0,Ui.dp(this,42),1)); line.addView(duration,new LinearLayout.LayoutParams(Ui.dp(this,72),Ui.dp(this,42))); bottom.addView(line,new LinearLayout.LayoutParams(-1,Ui.dp(this,42)));
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean user){if(user)elapsed.setText(time(p));} public void onStartTrackingTouch(SeekBar b){dragging=true;keepVisible();} public void onStopTrackingTouch(SeekBar b){dragging=false;video.seekTo(b.getProgress());scheduleHide();}});
         LinearLayout actions=new LinearLayout(this); actions.setGravity(Gravity.CENTER);
         actions.addView(action("↗\nمشاركة",v->share(),14),weight()); favorite=action("♡\nمفضلة",v->toggleFavorite(),14); actions.addView(favorite,weight());
@@ -114,7 +114,7 @@ public class VideoPlayerActivity extends Activity {
         @Override public boolean onSingleTapConfirmed(MotionEvent e){if(!locked)showControls(!visible);return true;}
         @Override public boolean onDoubleTap(MotionEvent e){if(locked)return true;boolean f=e.getX()>=root.getWidth()/2f;seekBy(f?10000:-10000);Toast.makeText(VideoPlayerActivity.this,f?"+10 ثوانٍ":"−10 ثوانٍ",Toast.LENGTH_SHORT).show();return true;}
         @Override public boolean onScroll(MotionEvent first,MotionEvent now,float dx,float dy){if(locked||scaleGestures.isInProgress())return false;if(zoom>1.02f){video.setTranslationX(clamp(video.getTranslationX()-dx,-root.getWidth()/3f,root.getWidth()/3f));video.setTranslationY(clamp(video.getTranslationY()-dy,-root.getHeight()/3f,root.getHeight()/3f));return true;}if(Math.abs(dy)<Math.abs(dx))return false;float amount=dy/Math.max(1f,root.getHeight());if(first.getX()<root.getWidth()/2f)brightness(amount);else volume(amount);return true;}
-    });scaleGestures=new ScaleGestureDetector(this,new ScaleGestureDetector.SimpleOnScaleGestureListener(){@Override public boolean onScaleBegin(ScaleGestureDetector d){handler.removeCallbacks(autoHide);video.setPivotX(clamp(d.getFocusX()-video.getLeft(),0,video.getWidth()));video.setPivotY(clamp(d.getFocusY()-video.getTop(),0,video.getHeight()));return true;}@Override public boolean onScale(ScaleGestureDetector d){float raw=zoom*d.getScaleFactor();zoom=clamp(zoom+(raw-zoom)*0.55f,0.7f,4f);applyDisplay();showGestureValue(pinchLabel());return true;}@Override public void onScaleEnd(ScaleGestureDetector d){snapZoom();scheduleHide();}});View.OnTouchListener touch=(v,e)->{scaleGestures.onTouchEvent(e);boolean handled=gestures.onTouchEvent(e);return handled||scaleGestures.isInProgress();};root.setOnTouchListener(touch);video.setOnTouchListener(touch);}
+    });scaleGestures=new ScaleGestureDetector(this,new ScaleGestureDetector.SimpleOnScaleGestureListener(){@Override public boolean onScaleBegin(ScaleGestureDetector d){handler.removeCallbacks(autoHide);return true;}@Override public boolean onScale(ScaleGestureDetector d){float raw=zoom*d.getScaleFactor();zoom=clamp(zoom+(raw-zoom)*0.55f,0.7f,4f);applyDisplay();showGestureValue(pinchLabel());return true;}@Override public void onScaleEnd(ScaleGestureDetector d){snapZoom();scheduleHide();}});View.OnTouchListener touch=(v,e)->{scaleGestures.onTouchEvent(e);boolean handled=gestures.onTouchEvent(e);return handled||scaleGestures.isInProgress();};root.setOnTouchListener(touch);video.setOnTouchListener(touch);}
     private void toggle(){if(video.isPlaying()){video.pause();play.setText("▶");keepVisible();}else{video.start();play.setText("Ⅱ");scheduleHide();}}
     private void seekBy(int delta){if(video.getDuration()<=0)return;int target=Math.max(0,Math.min(video.getDuration(),video.getCurrentPosition()+delta));video.seekTo(target);seek.setProgress(target);scheduleHide();}
     private void chooseSpeed(){String[] labels={"0.25×","0.5×","0.75×","1×","1.25×","1.5×","2×"};float[] values={.25f,.5f,.75f,1f,1.25f,1.5f,2f};new AlertDialog.Builder(this).setTitle("سرعة التشغيل").setItems(labels,(d,i)->{playbackSpeed=values[i];speed.setText(labels[i]);applySpeed();VideoMemory.setSpeed(this,uri.toString(),playbackSpeed);scheduleHide();}).show();}
@@ -123,8 +123,14 @@ public class VideoPlayerActivity extends Activity {
     private void volume(float delta){int max=audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC),now=audio.getStreamVolume(AudioManager.STREAM_MUSIC);int next=Math.max(0,Math.min(max,now+Math.round(delta*max)));audio.setStreamVolume(AudioManager.STREAM_MUSIC,next,0);showGestureValue((next==0?"🔇":"♪")+"  الصوت "+Math.round(next*100f/Math.max(1,max))+"%");}
     private void showGestureValue(String text){handler.removeCallbacks(hideGestureFeedback);gestureFeedback.animate().cancel();gestureFeedback.setText(text);gestureFeedback.setAlpha(1f);gestureFeedback.setVisibility(View.VISIBLE);gestureFeedback.bringToFront();handler.postDelayed(hideGestureFeedback,420);}
     private float clamp(float value,float min,float max){return Math.max(min,Math.min(max,value));}
-    private void cycleDisplay(){setDisplayMode((displayMode+1)%3);applyDisplay();String label=displayMode==0?"ملاءمة":displayMode==1?"ملء الشاشة":"تمديد";Toast.makeText(this,"طريقة العرض: "+label,Toast.LENGTH_SHORT).show();}
-    private void applyDisplay(){if(video.getWidth()<=0||video.getHeight()<=0||root.getWidth()<=0||root.getHeight()<=0)return;float sx=1f,sy=1f;if(displayMode==1){float fill=Math.max((float)root.getWidth()/video.getWidth(),(float)root.getHeight()/video.getHeight());sx=sy=fill;}else if(displayMode==2){sx=(float)root.getWidth()/video.getWidth();sy=(float)root.getHeight()/video.getHeight();}video.setScaleX(sx*zoom);video.setScaleY(sy*zoom);}
+    private void cycleDisplay(){
+        String[] labels={"ملاءمة: الفيديو كامل بدون قص","ملء الشاشة: بدون حواف سوده (يقص الأطراف)","تمديد: على مقاس الشاشة بالضبط"};
+        new AlertDialog.Builder(this).setTitle("طريقة العرض").setSingleChoiceItems(labels,displayMode,(d,which)->{
+            d.dismiss(); setDisplayMode(which); applyDisplay();
+            showGestureValue(which==0?"ملاءمة":which==1?"ملء الشاشة":"تمديد على مقاس الشاشة");
+        }).show();
+    }
+    private void applyDisplay(){if(video.getWidth()<=0||video.getHeight()<=0||root.getWidth()<=0||root.getHeight()<=0)return;video.setPivotX(video.getWidth()/2f);video.setPivotY(video.getHeight()/2f);if(zoom<=1.02f){video.setTranslationX(0);video.setTranslationY(0);}float sx=1f,sy=1f;if(displayMode==1){float fill=Math.max((float)root.getWidth()/video.getWidth(),(float)root.getHeight()/video.getHeight());sx=sy=fill;}else if(displayMode==2){sx=(float)root.getWidth()/video.getWidth();sy=(float)root.getHeight()/video.getHeight();}video.setScaleX(sx*zoom);video.setScaleY(sy*zoom);}
     private void previousVideo(){MediaItem item=VideoSession.previous();if(item==null){Toast.makeText(this,"هذا أول فيديو",Toast.LENGTH_SHORT).show();return;}playItem(item);}
     private void nextVideo(){MediaItem item=VideoSession.next();if(item==null){Toast.makeText(this,"هذا آخر فيديو",Toast.LENGTH_SHORT).show();return;}playItem(item);}
     private void playItem(MediaItem item){savePosition();uri=item.uri;name=item.name;mime=item.mimeType;videoPath=item.filePath;title.setText(name==null?"فيديو":name);resetSubtitles();abStart=abEnd=-1;zoom=1f;video.setTranslationX(0);video.setTranslationY(0);loading.setVisibility(View.VISIBLE);video.setVideoURI(uri);video.start();autoLoadSubtitle();}
@@ -193,7 +199,18 @@ public class VideoPlayerActivity extends Activity {
             if(found==null&&path!=null&&base!=null)found=fromFolder(new File(path).getParentFile(),base,language);
             if(found==null&&base!=null)found=fromAllowedFolders(base,language);
             List<SubtitleParser.Cue> result=found;
-            if(result==null||result.isEmpty())return;
+            if(result==null||result.isEmpty()){
+                if(subtitleFolderCount()==0&&!getSharedPreferences(PREFS_UI,MODE_PRIVATE).getBoolean("folder_hint",false))
+                    runOnUiThread(()->{
+                        if(isFinishing()||!forVideo.equals(uri))return;
+                        getSharedPreferences(PREFS_UI,MODE_PRIVATE).edit().putBoolean("folder_hint",true).apply();
+                        new AlertDialog.Builder(this).setTitle("ترجمة تلقائية")
+                                .setMessage("حتى يلگى Gallery X الترجمة وحده (ملف بنفس اسم الفلم، أو داخل مجلد الفلم)، اختار مرة وحدة المجلد اللي تنزّل بيه الأفلام، مثل Download. أندرويد ما يسمح يقرا ملفات الترجمة بدون إذنك.")
+                                .setPositiveButton("اختيار المجلد",(d,w)->pickSubtitleFolder())
+                                .setNegativeButton("لاحقاً",null).show();
+                    });
+                return;
+            }
             runOnUiThread(()->{
                 if(isFinishing()||!forVideo.equals(uri)||!subtitles.isEmpty())return;
                 applySubtitles(result,"انفتحت الترجمة تلقائياً");
@@ -201,33 +218,63 @@ public class VideoPlayerActivity extends Activity {
         });
     }
 
+    /**
+     * Next to the video: a subtitle with the same name, or, when the video sits in a folder named after the
+     * film, any subtitle in that folder or in its Subs / Subtitles folder.
+     */
     private List<SubtitleParser.Cue> fromFolder(File folder,String videoName,String language){
         if(folder==null)return null;
         File[] files; try{files=folder.listFiles();}catch(Exception denied){return null;}
         if(files==null)return null;
+        boolean filmFolder=SubtitleMatch.folderMatches(folder.getName(),videoName);
         File best=null; int bestScore=-1;
-        for(File file:files){int score=SubtitleMatch.score(videoName,file.getName(),language);if(score>bestScore){best=file;bestScore=score;}}
+        for(File file:files){
+            if(file.isDirectory()){
+                if(!(SubtitleMatch.isSubsFolder(file.getName())||SubtitleMatch.folderMatches(file.getName(),videoName)))continue;
+                File[] inner; try{inner=file.listFiles();}catch(Exception denied){inner=null;}
+                if(inner!=null)for(File sub:inner){
+                    int score=Math.max(SubtitleMatch.score(videoName,sub.getName(),language),SubtitleMatch.looseScore(sub.getName(),language)-1);
+                    if(score>bestScore){best=sub;bestScore=score;}
+                }
+                continue;
+            }
+            int score=SubtitleMatch.score(videoName,file.getName(),language);
+            if(filmFolder)score=Math.max(score,SubtitleMatch.looseScore(file.getName(),language));
+            if(score>bestScore){best=file;bestScore=score;}
+        }
         if(best==null)return null;
         try(InputStream in=new FileInputStream(best)){List<SubtitleParser.Cue> cues=readSubtitle(in);return cues.isEmpty()?null:cues;}catch(Exception denied){return null;}
     }
 
-    /** Searches the folders granted through "subtitle folders" (up to 3 levels deep). */
+    /**
+     * Searches the folders granted through "subtitle folders" (up to 4 levels deep): same-name subtitles
+     * anywhere, and any subtitle inside a folder named after the film (and its Subs folder).
+     */
     private List<SubtitleParser.Cue> fromAllowedFolders(String videoName,String language){
         Uri bestUri=null; int bestScore=-1;
+        String videoFolder=videoPath==null?null:new File(videoPath).getParentFile()==null?null:new File(videoPath).getParentFile().getName();
+        boolean videoFolderIsFilm=videoFolder!=null&&SubtitleMatch.folderMatches(videoFolder,videoName);
         for(UriPermission permission:getContentResolver().getPersistedUriPermissions()){
             Uri tree=permission.getUri();
             if(!permission.isReadPermission()||!android.provider.DocumentsContract.isTreeUri(tree))continue;
-            ArrayDeque<String[]> queue=new ArrayDeque<>(); queue.add(new String[]{android.provider.DocumentsContract.getTreeDocumentId(tree),"0"});
+            ArrayDeque<String[]> queue=new ArrayDeque<>(); queue.add(new String[]{android.provider.DocumentsContract.getTreeDocumentId(tree),"0","0"});
             int visited=0;
-            while(!queue.isEmpty()&&visited<4000&&bestScore<4){
-                String[] next=queue.poll(); int depth=Integer.parseInt(next[1]);
+            while(!queue.isEmpty()&&visited<6000&&bestScore<40){
+                String[] next=queue.poll(); int depth=Integer.parseInt(next[1]); boolean film="1".equals(next[2]);
                 Uri children=android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree,next[0]);
                 try(android.database.Cursor c=getContentResolver().query(children,new String[]{android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE},null,null,null)){
                     while(c!=null&&c.moveToNext()){
                         visited++;
                         String id=c.getString(0),file=c.getString(1),type=c.getString(2);
-                        if(android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(type)){if(depth<3)queue.add(new String[]{id,String.valueOf(depth+1)});continue;}
+                        if(android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(type)){
+                            boolean childFilm=film&&SubtitleMatch.isSubsFolder(file)
+                                    ||SubtitleMatch.folderMatches(file,videoName)
+                                    ||videoFolderIsFilm&&file.equalsIgnoreCase(videoFolder);
+                            if(depth<4)queue.add(new String[]{id,String.valueOf(depth+1),childFilm?"1":"0"});
+                            continue;
+                        }
                         int score=SubtitleMatch.score(videoName,file,language);
+                        if(film)score=Math.max(score,SubtitleMatch.looseScore(file,language));
                         if(score>bestScore){bestScore=score;bestUri=android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,id);}
                     }
                 }catch(Exception ignored){}

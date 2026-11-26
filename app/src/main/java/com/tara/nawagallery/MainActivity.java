@@ -52,6 +52,8 @@ public class MainActivity extends Activity {
     private static final int BACKUP_EXPORT_REQUEST = 48;
     private static final int BACKUP_IMPORT_REQUEST = 49;
     private static final int VAULT_ADD_FILES_REQUEST = 50;
+    private static final int MIRROR_ENABLE_REQUEST = 51;
+    private static final int MIRROR_RESTORE_REQUEST = 52;
     private enum Mode { PHOTOS, VIDEOS, ALBUMS, FAVORITES, SETTINGS, ALBUM, VAULT, DUPLICATES, TRASH }
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -1258,10 +1260,14 @@ public class MainActivity extends Activity {
     // ================================================================== vault tools: backup, restore, add files
 
     private void showVaultTools() {
-        String[] items = {"تصدير نسخة احتياطية مشفّرة", "استيراد نسخة احتياطية", "إضافة ملفات من مدير الملفات"};
+        boolean mirrorOn = VaultMirror.folder(this) != null;
+        String[] items = {"تصدير نسخة احتياطية مشفّرة (ملف واحد)", "استيراد نسخة احتياطية (ملف)", "إضافة ملفات من مدير الملفات",
+                "نسخة تلقائية لمجلد: " + (mirrorOn ? "مفعّلة ✓" : "متوقفة"), "استعادة الخزنة من مجلد النسخة التلقائية"};
         new AlertDialog.Builder(this)
                 .setTitle("أدوات الخزنة")
                 .setItems(items, (dialog, which) -> requireVault(() -> {
+                    if (which == 3) { mirrorMenu(); return; }
+                    if (which == 4) { pickMirrorFolder(MIRROR_RESTORE_REQUEST); return; }
                     VaultSession.hold(true);
                     Intent intent;
                     if (which == 0) {
@@ -1288,9 +1294,96 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    // ------------------------------------------------------------------ automatic backup folder
+
+    private void mirrorMenu() {
+        Uri folder = VaultMirror.folder(this);
+        if (folder == null) {
+            new AlertDialog.Builder(this).setTitle("نسخة تلقائية لمجلد")
+                    .setMessage("تختار مجلد مرة وحدة (مثلاً مجلد بالذاكرة، أو الكارت، أو مجلد يتزامن ويّا Google Drive)، وكل شي تضيفه أو تحذفه بالخزنة ينحفظ هناك وحده وهو مشفّر.\n\n"
+                            + "إذا انمسح التطبيق أو بدّلت الهاتف: تنصّب Gallery X، تسوّي خزنة، وتختار «استعادة الخزنة من مجلد النسخة التلقائية» وتكتب رقمك السري الحالي، وكل الملفات ترجع.\n\n"
+                            + "لا تمسح المجلد، ولا تنسى الرقم السري: بدونه النسخة ما تنفتح أبداً.")
+                    .setPositiveButton("اختيار المجلد", (d, w) -> pickMirrorFolder(MIRROR_ENABLE_REQUEST))
+                    .setNegativeButton("إلغاء", null).show();
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("نسخة تلقائية لمجلد ✓")
+                .setItems(new String[]{"مزامنة الآن", "تغيير المجلد", "إيقاف النسخ التلقائي"}, (d, which) -> {
+                    if (which == 0) runVaultTask("جارِ مزامنة النسخة…", progress -> {
+                        int changes = VaultMirror.sync(this, progress::step);
+                        return changes == 0 ? "النسخة محدّثة، ماكو تغيير." : "انحدّثت النسخة (" + changes + " تغيير).";
+                    });
+                    else if (which == 1) pickMirrorFolder(MIRROR_ENABLE_REQUEST);
+                    else {
+                        VaultMirror.disable(this);
+                        Toast.makeText(this, "توقف النسخ التلقائي. الملفات اللي بالمجلد تبقى مثل ما هي.", Toast.LENGTH_LONG).show();
+                    }
+                }).show();
+    }
+
+    private void pickMirrorFolder(int request) {
+        VaultSession.hold(true);
+        Intent tree = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        tree.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        Toast.makeText(this, request == MIRROR_ENABLE_REQUEST ? "اختار أو سوّي مجلد فارغ للنسخة، مثل GalleryX-Backup"
+                : "اختار المجلد اللي بيه النسخة التلقائية (بيه ملف GalleryX-vault-key.json)", Toast.LENGTH_LONG).show();
+        try { startActivityForResult(tree, request); }
+        catch (Exception error) {
+            VaultSession.hold(false);
+            Toast.makeText(this, "مدير الملفات ما يدعم اختيار مجلد", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void handleMirrorResult(int requestCode, Intent data) {
+        Uri tree = data.getData();
+        boolean enable = requestCode == MIRROR_ENABLE_REQUEST;
+        try {
+            getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | (enable ? Intent.FLAG_GRANT_WRITE_URI_PERMISSION : 0));
+        } catch (Exception ignored) { }
+        EditText pin = pinInput(enable ? "رقم الخزنة السري" : "الرقم السري للخزنة القديمة");
+        FrameLayout holder = new FrameLayout(this);
+        holder.setPadding(Ui.dp(this, 20), Ui.dp(this, 8), Ui.dp(this, 20), 0);
+        holder.addView(pin, new FrameLayout.LayoutParams(-1, Ui.dp(this, 54)));
+        boolean[] answered = {false};
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(enable ? "تأكيد الرقم السري" : "استعادة الخزنة")
+                .setMessage(enable ? "النسخة تنقفل برقمك السري، حتى تگدر تفتحها حتى بعد ما تمسح التطبيق."
+                        : "اكتب الرقم السري اللي كانت عليه الخزنة وقت سوّيت النسخة التلقائية.")
+                .setView(holder).setNegativeButton("إلغاء", null).setPositiveButton("متابعة", null).create();
+        dialog.setOnDismissListener(d -> { if (!answered[0]) VaultSession.hold(false); });
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String value = pin.getText().toString();
+            if (value.isEmpty()) return;
+            answered[0] = true;
+            dialog.dismiss();
+            if (enable) runVaultTask("جارِ تجهيز النسخة التلقائية…", progress -> {
+                if (VaultSession.unlock(this, value) != VaultSession.Status.OK) return "الرقم السري غير صحيح، ما تفعّلت النسخة.";
+                int copied = VaultMirror.enable(this, tree, value, progress::step);
+                return "تفعّلت النسخة التلقائية ✓\nانحفظ " + copied + " ملف، ومن هسه كل تغيير بالخزنة ينحفظ هناك وحده.";
+            });
+            else runVaultTask("جارِ استعادة الخزنة…", progress -> {
+                try {
+                    int restored = VaultMirror.restore(this, tree, value, progress::step);
+                    return "رجعت " + restored + " ملف للخزنة ✓";
+                } catch (VaultMirror.WrongPinException wrong) {
+                    return "الرقم السري غلط لهالنسخة.";
+                } catch (java.io.FileNotFoundException missing) {
+                    return "هذا المجلد ما بيه نسخة تلقائية من Gallery X (ماكو ملف GalleryX-vault-key.json).";
+                }
+            });
+        }));
+        dialog.show();
+    }
+
     private void handleVaultToolResult(int requestCode, int resultCode, Intent data) {
         if (resultCode != RESULT_OK || data == null) {
             VaultSession.hold(false);
+            return;
+        }
+        if (requestCode == MIRROR_ENABLE_REQUEST || requestCode == MIRROR_RESTORE_REQUEST) {
+            if (data.getData() == null) { VaultSession.hold(false); return; }
+            handleMirrorResult(requestCode, data);
             return;
         }
         if (!VaultSession.isUnlocked()) {
@@ -1661,7 +1754,8 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == BACKUP_EXPORT_REQUEST || requestCode == BACKUP_IMPORT_REQUEST || requestCode == VAULT_ADD_FILES_REQUEST) {
+        if (requestCode == BACKUP_EXPORT_REQUEST || requestCode == BACKUP_IMPORT_REQUEST || requestCode == VAULT_ADD_FILES_REQUEST
+                || requestCode == MIRROR_ENABLE_REQUEST || requestCode == MIRROR_RESTORE_REQUEST) {
             handleVaultToolResult(requestCode, resultCode, data);
             return;
         }
