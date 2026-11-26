@@ -200,13 +200,13 @@ public class VideoPlayerActivity extends Activity {
             if(found==null&&base!=null)found=fromAllowedFolders(base,language);
             List<SubtitleParser.Cue> result=found;
             if(result==null||result.isEmpty()){
-                if(subtitleFolderCount()==0&&!getSharedPreferences(PREFS_UI,MODE_PRIVATE).getBoolean("folder_hint",false))
+                if(subtitleFolderCount()==0&&!getSharedPreferences(PREFS_UI,MODE_PRIVATE).getBoolean("folder_hint_never",false))
                     runOnUiThread(()->{
                         if(isFinishing()||!forVideo.equals(uri))return;
-                        getSharedPreferences(PREFS_UI,MODE_PRIVATE).edit().putBoolean("folder_hint",true).apply();
                         new AlertDialog.Builder(this).setTitle("ترجمة تلقائية")
                                 .setMessage("حتى يلگى Gallery X الترجمة وحده (ملف بنفس اسم الفلم، أو داخل مجلد الفلم)، اختار مرة وحدة المجلد اللي تنزّل بيه الأفلام، مثل Download. أندرويد ما يسمح يقرا ملفات الترجمة بدون إذنك.")
                                 .setPositiveButton("اختيار المجلد",(d,w)->pickSubtitleFolder())
+                                .setNeutralButton("لا تسألني",(d,w)->getSharedPreferences(PREFS_UI,MODE_PRIVATE).edit().putBoolean("folder_hint_never",true).apply())
                                 .setNegativeButton("لاحقاً",null).show();
                     });
                 return;
