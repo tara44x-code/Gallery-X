@@ -295,17 +295,15 @@ public class TextEditorActivity extends Activity implements TextStageView.Listen
                 row.setOrientation(LinearLayout.VERTICAL);
                 row.setPadding(Ui.dp(TextEditorActivity.this, 18), Ui.dp(TextEditorActivity.this, 10), Ui.dp(TextEditorActivity.this, 18), Ui.dp(TextEditorActivity.this, 10));
                 FontStore.Font f = fonts.get(i);
+                // the font's own name written in that font, nothing else
+                int dash = f.label.indexOf(" — ");
+                String shown = dash < 0 ? f.label : f.arabic ? f.label.substring(0, dash) : f.label.substring(dash + 3);
                 TextView sample = new TextView(TextEditorActivity.this);
-                sample.setText(f.arabic ? "بسم الله · مرحبا" : "Hello · Gallery X");
-                sample.setTextSize(24);
+                sample.setText(shown + (f.id.equals(l.font) ? "  ✓" : ""));
+                sample.setTextSize(26);
                 sample.setTypeface(FontStore.get(TextEditorActivity.this, f.id));
                 sample.setTextColor(f.id.equals(l.font) ? theme.primary : 0xFF1A1A22);
-                TextView caption = new TextView(TextEditorActivity.this);
-                caption.setText(f.label + (f.id.equals(l.font) ? "  ✓" : ""));
-                caption.setTextSize(12);
-                caption.setTextColor(0xFF6B6680);
                 row.addView(sample);
-                row.addView(caption);
                 return row;
             }
         });
