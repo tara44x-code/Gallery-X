@@ -14,3 +14,4 @@
 -keep class com.tara.nawagallery.MusicLibraryActivity { public <init>(); }
 -keep class com.tara.nawagallery.MusicPlayerActivity { public <init>(); }
 -keep class com.tara.nawagallery.MusicWidget { public <init>(); }
+-keep class com.tara.nawagallery.TextEditorActivity { public <init>(); }

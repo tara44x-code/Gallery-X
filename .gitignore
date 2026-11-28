@@ -10,3 +10,4 @@ local.properties
 *.iml
 *.apk
 *.aab
+app/src/main/assets/fonts/

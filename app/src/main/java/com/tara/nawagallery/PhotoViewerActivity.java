@@ -167,6 +167,7 @@ public class PhotoViewerActivity extends Activity {
         actions.setBackgroundColor(0xDD171020);
         actions.addView(action("⇧\n" + getString(R.string.share), getString(R.string.share), v -> share()), actionParams());
         actions.addView(action("✎\nتعديل", "تعديل الصورة", v -> edit()), actionParams());
+        actions.addView(action("Aa\nكتابة", "كتابة وزخرفة على الصورة", v -> writeOnPhoto()), actionParams());
         favoriteButton = action("♡\n" + getString(R.string.favorite), getString(R.string.favorite), v -> toggleFavorite());
         actions.addView(favoriteButton, actionParams());
         slideshowButton = action("▶\nعرض", "عرض شرائح", v -> toggleSlideshow());
@@ -303,6 +304,17 @@ public class PhotoViewerActivity extends Activity {
 
     private void share() {
         ShareHelper.share(this, java.util.Collections.singletonList(current), getString(R.string.share));
+    }
+
+    private void writeOnPhoto() {
+        if (VaultStore.isVaultUri(current.uri)) {
+            Toast.makeText(this, "الكتابة تحفظ نسخة بالاستوديو، فما تشتغل على صور الخزنة", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Intent intent = new Intent(this, TextEditorActivity.class);
+        intent.putExtra(TextEditorActivity.EXTRA_URI, current.uri.toString());
+        intent.putExtra(TextEditorActivity.EXTRA_NAME, current.name);
+        startActivityForResult(intent, REQUEST_EDITOR);
     }
 
     private void edit() {

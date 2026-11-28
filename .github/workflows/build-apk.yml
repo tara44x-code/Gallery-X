@@ -43,6 +43,9 @@ jobs:
             echo "keyPassword=$KEYSTORE_PASSWORD"
           } > secure/keystore.properties
 
+      - name: Bundle decorative fonts
+        run: bash tools/fetch-fonts.sh
+
       - name: Build release APK
         run: gradle --no-daemon assembleRelease
 
