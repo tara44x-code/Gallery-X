@@ -3,7 +3,7 @@ package com.tara.nawagallery;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
-import android.graphics.PorterDuff;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
@@ -11,7 +11,8 @@ import android.os.Looper;
 import androidx.media3.common.Effect;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.audio.AudioProcessor;
-import androidx.media3.effect.CanvasOverlay;
+import androidx.media3.common.util.Size;
+import androidx.media3.effect.BitmapOverlay;
 import androidx.media3.effect.OverlayEffect;
 import androidx.media3.effect.TextureOverlay;
 import androidx.media3.transformer.Composition;
@@ -43,21 +44,43 @@ final class VideoTextExporter {
     private Transformer transformer;
     private boolean finished;
 
+    /** Displayed width and height of the video (rotation applied). */
+    private static int[] videoSize(Context context, Uri video) {
+        MediaMetadataRetriever r = new MediaMetadataRetriever();
+        try {
+            r.setDataSource(context, video);
+            int w = Integer.parseInt(r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH));
+            int h = Integer.parseInt(r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT));
+            String rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+            int rotation = rot == null ? 0 : Integer.parseInt(rot);
+            return rotation % 180 != 0 ? new int[]{h, w} : new int[]{w, h};
+        } catch (Exception e) {
+            return new int[]{1280, 720};
+        } finally {
+            try { r.release(); } catch (Exception ignored) { }
+        }
+    }
+
     /** Must be called on the main thread. */
     void start(Context context, Uri video, List<TextLayer> layers, File output, Callback callback) {
         Context app = context.getApplicationContext();
         List<TextLayer> snapshot = new ArrayList<>(layers);
-        CanvasOverlay overlay = new CanvasOverlay(true) {
+        int[] guess = videoSize(app, video);
+        BitmapOverlay overlay = new BitmapOverlay() {
+            private int w = guess[0], h = guess[1];
             private Bitmap cached;
 
-            @Override public void onDraw(Canvas canvas, long presentationTimeUs) {
-                int w = canvas.getWidth(), h = canvas.getHeight();
+            // Called by Media3 with the real frame size (after rotation) before drawing.
+            public void configure(Size videoSize) {
+                if (videoSize.getWidth() > 0 && videoSize.getHeight() > 0) { w = videoSize.getWidth(); h = videoSize.getHeight(); }
+            }
+
+            @Override public Bitmap getBitmap(long presentationTimeUs) {
                 if (cached == null || cached.getWidth() != w || cached.getHeight() != h) {
                     cached = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
                     LayerRenderer.drawAll(app, new Canvas(cached), snapshot, w, h);
                 }
-                canvas.drawColor(0, PorterDuff.Mode.CLEAR);
-                canvas.drawBitmap(cached, 0, 0, null);
+                return cached;
             }
         };
         Effects effects = new Effects(ImmutableList.<AudioProcessor>of(),
